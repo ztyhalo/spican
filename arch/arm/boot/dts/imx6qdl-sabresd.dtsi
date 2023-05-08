@@ -278,6 +278,7 @@
 		//interrupts = <0 5 IRQ_TYPE_LEVEL_HIGH>;
 		interrupts-extended = <&gpio4 5 4>;
 		spi-max-frequency = <5000000>;
+		rst-gpios = <&gpio7 12 0>;
 		status = "okay";
 		//vdd-supply = <&reg_3p3v>;
 		//xceiver-supply = <&reg_3p3v>;
@@ -645,6 +646,8 @@
 				//MX6QDL_PAD_CSI0_MCLK__GPIO5_IO19 0x80000000
 				MX6QDL_PAD_EIM_D27__GPIO3_IO27  0x80000000
 
+				MX6QDL_PAD_GPIO_17__GPIO7_IO12  0x80000000
+
 			>;
 		};
 
@@ -896,7 +899,7 @@
 				MX6QDL_PAD_SD3_DAT1__SD3_DATA1		0x17059
 				MX6QDL_PAD_SD3_DAT2__SD3_DATA2		0x17059
 				MX6QDL_PAD_SD3_DAT3__SD3_DATA3		0x17059
-				MX6QDL_PAD_GPIO_17__GPIO7_IO12		0x80000000
+				//MX6QDL_PAD_GPIO_17__GPIO7_IO12		0x80000000
 				MX6QDL_PAD_GPIO_18__GPIO7_IO13		0x80000000
 			>;
 		};
@@ -1254,5 +1257,5 @@
 	fsl,weim-cs-timing = <0x01010089 0x00000001 0x0C200100
 	                        0x00000008 0xA400840 0x00000000>;
 	phy-reset-gpios = <&gpio3 23 0>;
-	status = "ok";
+	status = "okay";
 };

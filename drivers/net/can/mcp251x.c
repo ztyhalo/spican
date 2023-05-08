@@ -76,6 +76,7 @@
 #include <linux/spi/spi.h>
 #include <linux/uaccess.h>
 #include <linux/regulator/consumer.h>
+#include <linux/of_gpio.h>
 
 /* SPI interface instruction set */
 #define INSTRUCTION_WRITE	0x02
@@ -204,6 +205,8 @@
 #define SET_BYTE(val, byte)			\
 	(((val) & 0xff) << ((byte) * 8))
 
+static int  rst_gpio;
+
 /*
  * Buffer size required for the largest SPI transfer (i.e., reading a
  * frame)
@@ -214,7 +217,7 @@
 
 #define TX_ECHO_SKB_MAX	1
 
-#define MCP251X_OST_DELAY_MS	(5)
+#define MCP251X_OST_DELAY_MS	(50)
 
 #define DEVICE_NAME "mcp251x"
 
@@ -938,6 +941,21 @@ static int mcp251x_open(struct net_device *net)
 	unsigned long flags = IRQF_ONESHOT | IRQF_TRIGGER_FALLING;
 	int ret;
 
+	if (!gpio_is_valid(rst_gpio)) {
+		printk("zty mcp251x no rst gpio!\n");
+	}
+	else
+	{
+		printk("zty open mcp251x rst gpio ok!\n");
+
+		gpio_set_value(rst_gpio, 0);
+
+		msleep(100);
+
+		gpio_set_value(rst_gpio, 1);
+		msleep(100);
+	}
+
 	ret = open_candev(net);
 	if (ret) {
 		dev_err(&spi->dev, "unable to set initial baudrate!\n");
@@ -966,16 +984,19 @@ static int mcp251x_open(struct net_device *net)
 
 	ret = mcp251x_hw_reset(spi);
 	if (ret) {
+		printk("zty mcp251x_hw_reset fail!\n");
 		mcp251x_open_clean(net);
 		goto open_unlock;
 	}
 	ret = mcp251x_setup(net, priv, spi);
 	if (ret) {
+		printk("zty mcp251x_setup fail!\n");
 		mcp251x_open_clean(net);
 		goto open_unlock;
 	}
 	ret = mcp251x_set_normal_mode(spi);
 	if (ret) {
+		printk("zty mcp251x_set_normal_mode fail!\n");
 		mcp251x_open_clean(net);
 		goto open_unlock;
 	}
@@ -983,6 +1004,7 @@ static int mcp251x_open(struct net_device *net)
 	can_led_event(net, CAN_LED_EVENT_OPEN);
 
 	netif_wake_queue(net);
+	printk("zty mcp251x open ok!\n");
 
 open_unlock:
 	mutex_unlock(&priv->mcp_lock);
@@ -1031,8 +1053,10 @@ static int mcp251x_can_probe(struct spi_device *spi)
 	struct mcp251x_priv *priv;
 	struct clk *clk;
 	int freq, ret;
+	struct device *dev = &spi->dev;
+//	int rst_gpio = 0;
 
-	printk("zty mcp251x probe start!\n");
+	//printk("zty mcp251x probe start!\n");
 
 	clk = devm_clk_get(&spi->dev, NULL);
 	if (IS_ERR(clk)) {
@@ -1042,6 +1066,22 @@ static int mcp251x_can_probe(struct spi_device *spi)
 			return PTR_ERR(clk);
 	} else {
 		freq = clk_get_rate(clk);
+	}
+
+	rst_gpio = of_get_named_gpio(dev->of_node, "rst-gpios", 0);
+	if (!gpio_is_valid(rst_gpio)) {
+		printk("zty mcp251x no rst gpio!\n");
+	}
+	else
+	{
+		printk("zty mcp251x rst gpio ok!\n");
+
+		gpio_set_value(rst_gpio, 0);
+
+		msleep(100);
+
+		gpio_set_value(rst_gpio, 1);
+		msleep(100);
 	}
 
 	/* Sanity check */
@@ -1058,7 +1098,7 @@ static int mcp251x_can_probe(struct spi_device *spi)
 		if (ret)
 			goto out_free;
 	}
-	printk("zty mcp251x %d!\n",__LINE__);
+	//printk("zty mcp251x %d!\n",__LINE__);
 	net->netdev_ops = &mcp251x_netdev_ops;
 	net->flags |= IFF_ECHO;
 
@@ -1086,7 +1126,7 @@ static int mcp251x_can_probe(struct spi_device *spi)
 	ret = spi_setup(spi);
 	if (ret)
 		goto out_clk;
-	printk("zty mcp251x %d!\n",__LINE__);
+//	printk("zty mcp251x %d!\n",__LINE__);
 
 	priv->power = devm_regulator_get(&spi->dev, "vdd");
 	priv->transceiver = devm_regulator_get(&spi->dev, "xceiver");
@@ -1095,18 +1135,18 @@ static int mcp251x_can_probe(struct spi_device *spi)
 		ret = -EPROBE_DEFER;
 		goto out_clk;
 	}
-	printk("zty mcp251x %d!\n",__LINE__);
+//	printk("zty mcp251x %d!\n",__LINE__);
 	ret = mcp251x_power_enable(priv->power, 1);
 	if (ret)
 		goto out_clk;
-	printk("zty mcp251x %d!\n",__LINE__);
+//	printk("zty mcp251x %d!\n",__LINE__);
 	priv->spi = spi;
 	mutex_init(&priv->mcp_lock);
 
 	/* If requested, allocate DMA buffers */
 	if (mcp251x_enable_dma) {
 
-		printk("zty mcp251x enable dma!\n");
+//		printk("zty mcp251x enable dma!\n");
 		spi->dev.coherent_dma_mask = ~0;
 
 		/*
@@ -1124,11 +1164,11 @@ static int mcp251x_can_probe(struct spi_device *spi)
 							(PAGE_SIZE / 2));
 		} else {
 			/* Fall back to non-DMA */
-			printk("zty mcp251x no dma!\n");
+			//printk("zty mcp251x no dma!\n");
 			mcp251x_enable_dma = 0;
 		}
 	}
-	printk("zty mcp251x %d!\n",__LINE__);
+	//printk("zty mcp251x %d!\n",__LINE__);
 	/* Allocate non-DMA buffers */
 	if (!mcp251x_enable_dma) {
 		priv->spi_tx_buf = devm_kzalloc(&spi->dev, SPI_TRANSFER_BUF_LEN,
@@ -1148,10 +1188,15 @@ static int mcp251x_can_probe(struct spi_device *spi)
 	SET_NETDEV_DEV(net, &spi->dev);
 
 	/* Here is OK to not lock the MCP, no one knows about it yet */
-		printk("zty mcp251x %d!\n",__LINE__);
+//		printk("zty mcp251x %d!\n",__LINE__);
 	ret = mcp251x_hw_probe(spi);
 	if (ret)
+	{
+		printk("zty mcp251x hw probe error!\n");
 		goto error_probe;
+	}
+	else
+		printk("zty mcp251x hw probe ok!\n");
 
 	mcp251x_hw_sleep(spi);
 
