@@ -1513,7 +1513,8 @@ ax88796b_block_input (struct net_device *ndev, int count,
 #else
 	{
 		for (i = 0; i < count; i += 2) {
-			*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+			//*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+			*buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
 		}
 	}
 #endif
@@ -1581,8 +1582,8 @@ ax_block_output (struct net_device *ndev, int count,
 	{
 		u16 i;
 		for (i = 0; i < count; i += 2) {
-			WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT),
-					*((u16 *)(buf + i)));
+			//WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
+			*((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
 		}
 	}
 #endif
