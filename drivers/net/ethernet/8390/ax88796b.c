@@ -41,6 +41,7 @@
 #include <linux/clk.h>
 #include <linux/io.h>
 #include <linux/of_device.h>
+#include <linux/of_address.h>
 //#include <mach/mx6.h>
 #include <linux/of_gpio.h>
 #include <linux/mfd/syscon/imx6q-iomuxc-gpr.h>
@@ -759,16 +760,103 @@ struct ethtool_ops ax88796b_ethtool_ops = {
 	.nway_reset		= ax88796b_nway_reset,
 };
 
+
+//ssize_t ds2460_read_generic(u8 *buf, loff_t addr, unsigned len);
+
+#define HW_OCOTP_CUST_N(n)	(0x00000400 + (n) * 0x10)
+#define BF(value, field)	(((value) << BP_##field) & BM_##field)
+#define HW_OCOTP_TIMING			0x00000010
+#define BP_OCOTP_TIMING_STROBE_READ	16
+#define BM_OCOTP_TIMING_STROBE_READ	0x003F0000
+#define BP_OCOTP_TIMING_RELAX		12
+#define BM_OCOTP_TIMING_RELAX		0x0000F000
+#define BP_OCOTP_TIMING_STROBE_PROG	0
+#define BM_OCOTP_TIMING_STROBE_PROG	0x00000FFF
+#define HW_OCOTP_CTRL			0x00000000
+#define BM_OCOTP_CTRL_ERROR		0x00000200
+#define BM_OCOTP_CTRL_BUSY		0x00000100
+
+
+static void set_otp_timing(void* otp_base, struct clk *otp_clk)
+{
+	unsigned long clk_rate = 0;
+	unsigned long strobe_read, relex, strobe_prog;
+	u32 timing = 0;
+
+	clk_rate = clk_get_rate(otp_clk);
+
+	/* do optimization for too many zeros */
+	relex = clk_rate / (1000000000 / 20) - 1;
+	strobe_prog = clk_rate / (1000000000 / 10000) + 2 * (20 + 1) - 1;
+	strobe_read = clk_rate / (1000000000 / 40) + 2 * (20 + 1) - 1;
+
+	timing = BF(relex, OCOTP_TIMING_RELAX);
+	timing |= BF(strobe_read, OCOTP_TIMING_STROBE_READ);
+	timing |= BF(strobe_prog, OCOTP_TIMING_STROBE_PROG);
+
+	__raw_writel(timing, otp_base + HW_OCOTP_TIMING);
+}
+
+static int otp_wait_busy(u32 flags, void* otp_base, struct clk *otp_clk)
+{
+	int count;
+	u32 c;
+
+	for (count = 10000; count >= 0; count--) {
+		c = __raw_readl(otp_base + HW_OCOTP_CTRL);
+		if (!(c & (BM_OCOTP_CTRL_BUSY | BM_OCOTP_CTRL_ERROR | flags)))
+			break;
+		cpu_relax();
+	}
+
+	if (count < 0)
+		return -ETIMEDOUT;
+
+	return 0;
+}
+
 /*
  * ----------------------------------------------------------------------------
  * Function Name: ax88796b_load_macaddr
  * Purpose: Load MAC address from EEPROM
  * ----------------------------------------------------------------------------
  */
-ssize_t ds2460_read_generic(u8 *buf, loff_t addr, unsigned len);
-static void
-ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
+static void ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
 {
+	struct device_node *np = NULL;
+	struct clk *otp_clk;
+	void __iomem *otp_base;
+	struct resource res;
+	int ret;
+	u32 value = 0;
+
+	np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-ocotp");
+	ret=of_address_to_resource(np, 0, &res);
+	otp_base=ioremap(res.start,0x4000);
+	otp_clk = of_clk_get(np, 0);
+	if (IS_ERR(otp_clk)) {
+		printk( "wwwwwww of_clk_get_by_name xxxxxxx\n");
+	}
+
+	ret = clk_prepare_enable(otp_clk);
+	if (ret)
+		printk("clk_prepare_enable xxxxxxxx\n");
+
+	set_otp_timing(otp_base, otp_clk);
+	ret = otp_wait_busy(0, otp_base, otp_clk);
+	if (ret)
+		printk("otp_wait_busy xxxxxxxx\n");
+
+	value = __raw_readl(otp_base + HW_OCOTP_CUST_N(34));
+	pMac[2]=value>>24;
+	pMac[3]=value>>16;
+	pMac[4]=value>>8;
+	pMac[5]=value;
+	value = __raw_readl(otp_base + HW_OCOTP_CUST_N(35));
+	pMac[0]=value>>8;
+	pMac[1]=value;
+	clk_disable_unprepare(otp_clk);
+
 #if 0
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	void *ax_base = ax_local->membase;
@@ -806,7 +894,7 @@ ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
 		PRINTK (DRIVER_MSG, "Use random MAC address\n");
 		random_ether_addr(pMac);
 	}
-#else
+//#else
 	ds2460_read_generic(pMac, 0x90, 6);
 	if (!is_valid_ether_addr (pMac)) {
 		PRINTK (DRIVER_MSG, "MAC read from ds2460 is invalid, so use random MAC address\n");
@@ -2548,8 +2636,8 @@ ax88796b_cleanup(void)
 	platform_driver_unregister (&ax88796b_driver);
 }
 
-//module_init(ax88796b_init_mod);
-device_initcall_sync(ax88796b_init_mod);
+module_init(ax88796b_init_mod);
+//device_initcall_sync(ax88796b_init_mod);
 //late_initcall(ax88796b_init_mod);
 module_exit(ax88796b_cleanup);
 
