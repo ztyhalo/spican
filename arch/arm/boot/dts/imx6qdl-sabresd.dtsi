@@ -227,7 +227,7 @@
 		mclk_source = <0>;
 		status = "okay";
 	};
-
+/*
 	v4l2_cap_1 {
 		compatible = "fsl,imx6q-v4l2-capture";
 		ipu_id = <0>;
@@ -235,7 +235,7 @@
 		mclk_source = <0>;
 		status = "okay";
 	};
-
+*/
 	v4l2_out {
 		compatible = "fsl,mxc_v4l2_output";
 		status = "okay";
@@ -483,7 +483,23 @@
 	pinctrl-0 = <&pinctrl_i2c3>;
 	status = "okay";
 
-
+	ov5640_mipi: ov5640_mipi@3c { 
+		compatible = "ov5640_mipi"; 
+		//pinctrl-names = "default";
+  		//pinctrl-0 = <&pinctrl_mipi_gpio>;
+		reg = <0x3c>; 
+		clocks = <&clks IMX6QDL_CLK_CKO>; 
+		clock-names = "csi_mclk"; 
+		DOVDD-supply = <&vgen4_reg>;
+		AVDD-supply = <&vgen3_reg>; 
+					
+		DVDD-supply = <&vgen2_reg>;  
+		pwn-gpios = <&gpio5 31 0>;  
+		rst-gpios = <&gpio1 5 0>;  
+		csi_id = <0>; 
+		mclk = <24000000>; 
+		mclk_source = <0>; 
+	}; 
 
 	/*imx307_mipi: imx307_mipi@6c {
 		compatible = "sony,imx307_mipi"; 
@@ -604,7 +620,8 @@
 				MX6QDL_PAD_NANDF_D2__GPIO2_IO02 0x80000000
 				MX6QDL_PAD_NANDF_D3__GPIO2_IO03 0x80000000
 				/* MX6QDL_PAD_GPIO_0__CCM_CLKO1    0x130b0 */
-				MX6QDL_PAD_GPIO_0__CCM_CLKO1    0x130b0
+				//MX6QDL_PAD_GPIO_0__CCM_CLKO1    0x130b0
+				MX6QDL_PAD_CSI0_MCLK__CCM_CLKO1   0x130b0/*mclk*/
 				MX6QDL_PAD_NANDF_CLE__GPIO6_IO07 0x80000000
 				MX6QDL_PAD_NANDF_ALE__GPIO6_IO08 0x80000000
 				MX6QDL_PAD_ENET_TXD1__GPIO1_IO29 0x80000000
@@ -648,7 +665,7 @@
 				MX6QDL_PAD_EIM_D27__GPIO3_IO27  0x80000000
 
 				MX6QDL_PAD_GPIO_17__GPIO7_IO12  0x80000000
-
+MX6QDL_PAD_CSI0_DAT13__GPIO5_IO31 0x80000000
 			>;
 		};
 
@@ -788,7 +805,7 @@
 				MX6QDL_PAD_DISP0_DAT23__IPU1_DISP0_DATA23  0x10
 			>;
 		};
-
+#if 0
 		pinctrl_ipu1_2: ipu1grp-2 { /* parallel camera */
 			fsl,pins = <
 				MX6QDL_PAD_CSI0_DAT12__IPU1_CSI0_DATA12    0x80000000
@@ -806,7 +823,7 @@
 				MX6QDL_PAD_CSI0_VSYNC__IPU1_CSI0_VSYNC     0x80000000
 			>;
 		};
-
+#endif
 		pinctrl_pwm1: pwm1grp {
 			fsl,pins = <
 				MX6QDL_PAD_GPIO_9__PWM1_OUT		0x1b0b1
@@ -1119,7 +1136,7 @@
 &mipi_csi {
 	status = "okay";
 	ipu_id = <0>;
-	csi_id = <1>;
+	csi_id = <0>;
 	v_channel = <0>;
 	lanes = <2>;
 };

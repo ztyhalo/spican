@@ -3000,9 +3000,9 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
 	int i;
 	struct sensor_data *sdata = slave->priv;
 
-	pr_debug("In MVC: mxc_v4l2_master_attach\n");
-	pr_debug("   slave.name = %s\n", slave->name);
-	pr_debug("   master.name = %s\n", slave->u.slave->master->name);
+	printk("In MVC: mxc_v4l2_master_attach\n");
+	printk("   slave.name = %s\n", slave->name);
+	printk("   master.name = %s\n", slave->u.slave->master->name);
 
 	if (slave == NULL) {
 		pr_err("ERROR: v4l2 capture: slave parameter not valid.\n");
