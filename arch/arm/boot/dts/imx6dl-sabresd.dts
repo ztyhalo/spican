@@ -16,11 +16,7 @@
 	compatible = "fsl,imx6dl-sabresd", "fsl,imx6dl";
 };
 
-&battery {
-	offset-charger = <1485>;
-	offset-discharger = <1464>;
-	offset-usb-charger = <1285>;
-};
+
 
 &iomuxc {
 /*
@@ -55,6 +51,7 @@
 };
 
 &i2c3 {
+	#if 0
         max17135@48 {
                 compatible = "maxim,max17135";
                 reg = <0x48>;
@@ -121,6 +118,7 @@
                         };
                 };
         };
+	#endif
 };
 
 &ldb {
