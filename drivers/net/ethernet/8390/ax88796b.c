@@ -2424,9 +2424,9 @@ static int ax88796b_drv_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to get phy-reset-gpios: %d\n", err);
 		return -EBUSY;
 	}
-	msleep(100);
+	msleep(20);
 	gpio_set_value(phy_reset, 1);
-	mdelay (100);
+	msleep(20);
 
 	ndev = alloc_etherdev (sizeof (struct ax_device));
 	if (!ndev) {
