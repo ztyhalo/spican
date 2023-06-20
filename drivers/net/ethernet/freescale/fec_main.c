@@ -932,7 +932,7 @@ fec_restart(struct net_device *ndev)
 	u32 rcntl = OPT_FRAME_SIZE | 0x04;
 	u32 ecntl = FEC_ENET_ETHEREN; /* ETHEREN */
 
-	printk("zty fec restart!\n");
+	//printk("zty fec restart!\n");
 
 	/* Whack a reset.  We should wait for this.
 	 * For i.MX6SX SOC, enet use AXI bus, we use disable MAC
@@ -976,7 +976,7 @@ fec_restart(struct net_device *ndev)
 	}
 
 	/* Set MII speed */
-	printk("zty fep phy speed is 0x%x!\n", fep->phy_speed);
+	//printk("zty fep phy speed is 0x%x!\n", fep->phy_speed);
 	writel(fep->phy_speed, fep->hwp + FEC_MII_SPEED);
 //	printk("zty read FEC_MII_SPEED 0x%x!\n", readl(fep->hwp + FEC_MII_SPEED));
 
@@ -3200,7 +3200,7 @@ static int fec_enet_init(struct net_device *ndev)
 	fep->tx_align = 0x3;
 #endif
 
-	printk("zty fep align %d!\n", fep->rx_align);
+	//printk("zty fep align %d!\n", fep->rx_align);
 	fec_enet_alloc_queue(ndev);
 
 	if (fep->bufdesc_ex)
@@ -3347,7 +3347,7 @@ fec_enet_get_queue_num(struct platform_device *pdev, int *num_tx, int *num_rx)
 	if (err)
 		*num_rx = 1;
 
-	printk("fsl rx num is %d!\n", *num_rx);
+	//printk("fsl rx num is %d!\n", *num_rx);
 
 	if (*num_tx < 1 || *num_tx > FEC_ENET_MAX_TX_QS) {
 		dev_warn(&pdev->dev, "Invalid num_tx(=%d), fall back to 1\n",

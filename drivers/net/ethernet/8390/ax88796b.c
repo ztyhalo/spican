@@ -1142,9 +1142,9 @@ restart:
 
 	switch (ax_local->media) {
 	case MEDIA_AUTO:
-		if (echo)
-			PRINTK (DRIVER_MSG, PFX 
-				" The media mode is autosense.\n");
+		//if (echo)
+		//	PRINTK (DRIVER_MSG, PFX 
+		//		" The media mode is autosense.\n");
 		advertise |= ADVERTISE_ALL | 0x400;
 		break;
 
@@ -2206,11 +2206,11 @@ static int ax_probe (struct net_device *ndev, struct ax_device *ax_local)
 
 	if (weight == 0) {
 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, 4);
-		PRINTK (DRIVER_MSG, "NAPI_WEIGHT (default) = %d\n", 4);
+		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT (default) = %d\n", 4);
 	}
 	else {
 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, weight);
-		PRINTK (DRIVER_MSG, "NAPI_WEIGHT= %d\n", weight);
+		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT= %d\n", weight);
 	}
 #if (CONFIG_AX88796B_8BIT_WIDE == 1)
 	ax_local->bus_width = 0;
@@ -2227,9 +2227,9 @@ static int ax_probe (struct net_device *ndev, struct ax_device *ax_local)
 		PRINTK (DRIVER_MSG, " %2.2x", ndev->dev_addr[i]);
 	}
 
-	PRINTK (DRIVER_MSG, "\n");
-	PRINTK (DRIVER_MSG, PFX " found at 0x%x, using IRQ %d.\n",
-		AX88796B_BASE, ndev->irq);
+	//PRINTK (DRIVER_MSG, "\n");
+	//PRINTK (DRIVER_MSG, PFX " found at 0x%x, using IRQ %d.\n",
+	//	AX88796B_BASE, ndev->irq);
 
 	/* Initialize MII structure */
 	ax_local->mii.dev = ndev;
@@ -2445,7 +2445,7 @@ static int ax88796b_drv_probe(struct platform_device *pdev)
 	ax_local->membase = addr;
  	ax_local->ndev = ndev;
 
-	printk("zty ax_probe before!\n");
+	//printk("zty ax_probe before!\n");
 	ret = ax_probe (ndev, ax_local);
 	if (!ret) {
 		PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);

@@ -872,7 +872,7 @@ static int spi_imx_sdma_init(struct device *dev, struct spi_imx_data *spi_imx,
 	spi_imx->bitbang.master->flags = SPI_MASTER_MUST_RX |
 					 SPI_MASTER_MUST_TX;
 	spi_imx->dma_is_inited = 1;
-	printk("zty spi sdma end!\n");
+	//printk("zty spi sdma end!\n");
 
 	return 0;
 err:

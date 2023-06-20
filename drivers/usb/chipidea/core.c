@@ -904,7 +904,7 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 	}
 
 	ci->role = ci_get_role(ci);
-	printk("zty ci role is %d!\n", ci->role);
+	//printk("zty ci role is %d!\n", ci->role);
 	/* only update vbus status for peripheral */
 	if (ci->role == CI_ROLE_GADGET)
 		ci_handle_vbus_connected(ci);

@@ -145,7 +145,7 @@ int of_mdiobus_register(struct mii_bus *mdio, struct device_node *np)
 	/* Loop over the child nodes and register a phy_device for each one */
 	for_each_available_child_of_node(np, child) {
 		addr = of_mdio_parse_addr(&mdio->dev, child);
-		printk("zty get node dev addr %d!\n", addr);
+		//printk("zty get node dev addr %d!\n", addr);
 		if (addr < 0) {
 			scanphys = true;
 			continue;

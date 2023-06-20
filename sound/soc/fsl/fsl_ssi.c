@@ -1370,11 +1370,11 @@ static int fsl_ssi_probe(struct platform_device *pdev)
 		return -ENODEV;
 
 //	dump_stack();
-	printk("zty fsl ssi probe %s!\n", pdev->name);
+	//printk("zty fsl ssi probe %s!\n", pdev->name);
 	of_id = of_match_device(fsl_ssi_ids, &pdev->dev);
 	if (!of_id || !of_id->data)
 		return -EINVAL;
-	printk("comptible is %s!\n", of_id->compatible);
+	//printk("comptible is %s!\n", of_id->compatible);
 
 	ssi_private = devm_kzalloc(&pdev->dev, sizeof(*ssi_private),
 			GFP_KERNEL);

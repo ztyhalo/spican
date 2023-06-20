@@ -176,7 +176,7 @@ struct phy_device *phy_device_create(struct mii_bus *bus, int addr, int phy_id,
 	dev->phy_id = phy_id;
 	if (is_c45)
 	{
-		printk("zty phy id is 0x%x!\n", dev->phy_id);
+		//printk("zty phy id is 0x%x!\n", dev->phy_id);
 		dev->c45_ids = *c45_ids;
 		dev->autoneg = AUTONEG_DISABLE;
 		dev->link = 0;
@@ -221,7 +221,7 @@ EXPORT_SYMBOL(phy_device_create);
  *
  * Returns: negative error number on bus access error, zero if no device
  * is responding, or positive if a device is present.
- */
+ *
 static int phy_c45_probe_present(struct mii_bus *bus, int prtad, int devad)
 {
         int stat2;
@@ -235,7 +235,7 @@ static int phy_c45_probe_present(struct mii_bus *bus, int prtad, int devad)
 
         return (stat2 & MDIO_STAT2_DEVPRST) == MDIO_STAT2_DEVPRST_VAL;
 }
-
+*/
 /* get_phy_c45_devs_in_pkg - reads a MMD's devices in package registers.
  * @bus: the target MII bus
  * @addr: PHY address on the MII bus
@@ -272,7 +272,7 @@ static int phy_c45_probe_present(struct mii_bus *bus, int prtad, int devad)
 
 //         return 0;
 // }
-
+/*
 static int get_phy_c45_devs_in_pkg(struct mii_bus *bus, int addr, int dev_addr,
 				   u32 *devices_in_package)
 {
@@ -294,7 +294,7 @@ static int get_phy_c45_devs_in_pkg(struct mii_bus *bus, int addr, int dev_addr,
 
 	return 0;
 }
-
+*/
 /**
  * get_phy_c45_ids - reads the specified addr for its 802.3-c45 IDs.
  * @bus: the target MII bus
@@ -364,7 +364,7 @@ static int get_phy_c45_ids(struct mii_bus *bus, int addr, u32 *phy_id,
 		if (!(c45_ids->devices_in_package & (1 << i)))
 			continue;
             *phy_id  = c45_ids->device_ids[i];
-            printk("zty c45 phy id 0x%x!\n", *phy_id);
+           // printk("zty c45 phy id 0x%x!\n", *phy_id);
             return 0;
     }
 
@@ -1484,7 +1484,7 @@ static int gen10g_read_status(struct phy_device *phydev)
 //	int devad, reg;
 	int val;
 	int adv;
-	int err;
+//	int err;
 	int lpa;
 	int lpagb = 0;
 	int common_adv;
@@ -1699,7 +1699,7 @@ static int genphy_config_init(struct phy_device *phydev)
 
 	return 0;
 }
-
+/*
 static int gen10g_get_features(struct phy_device *phydev)
 {
 	int val;
@@ -1738,6 +1738,7 @@ static int gen10g_get_features(struct phy_device *phydev)
 
 	return 0;
 }
+*/
 static inline int zty_c45_read(struct phy_device *dev, int devad, int reg)
 {
 	return mdiobus_c45_read(dev->bus, dev->addr, devad, reg);
@@ -1759,7 +1760,7 @@ static int gen10g_config_init(struct phy_device *phydev)
 //	phydev->supported = SUPPORTED_10000baseT_Full;
 	
 	int speed = 1000;
-	int polarity_ena_100 = 1;
+//	int polarity_ena_100 = 1;
 	int tc10_ctrl, tc10_disable, superisolate;
 	int autoneg = 0;
 	int workmode= 0;
@@ -1777,14 +1778,14 @@ static int gen10g_config_init(struct phy_device *phydev)
 //	printk("zty devad 7 address 0x200 val 0x%x!\n", val);
 	if(val & (1 << 12))
 	{
-		printk("zty rxd3 is hight!\n");
+		//printk("zty rxd3 is hight!\n");
 		phydev->autoneg = SUPPORTED_Autoneg;
 		features |= SUPPORTED_Autoneg;
 		autoneg = 1;
 	}
 	else
 	{
-		printk("zty rxd3 is low!\n");
+		//printk("zty rxd3 is low!\n");
 
 		phydev->autoneg = AUTONEG_DISABLE;
 		autoneg = 0;

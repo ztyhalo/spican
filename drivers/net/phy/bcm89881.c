@@ -321,14 +321,14 @@ static int bcm89881_config_init(struct phy_device *phydev)
 
 	if(val & (1 << 12))
 	{
-		printk("zty rxd3 is hight!\n");
+		//printk("zty rxd3 is hight!\n");
 		phydev->autoneg = AUTONEG_ENABLE;
 		features |= SUPPORTED_Autoneg;
 		autoneg = 1;
 	}
 	else
 	{
-		printk("zty rxd3 is low!\n");
+		//printk("zty rxd3 is low!\n");
 
 		phydev->autoneg = AUTONEG_DISABLE;
 		autoneg = 0;
@@ -660,7 +660,7 @@ static int bcm89881_config_init(struct phy_device *phydev)
 	//	if(speed == 1000)
 		{		
 			val = zty_c45_read(phydev, 0x01, 0xa010);
-			printk("zty  0xa010 0x%x!\n", val);
+			//printk("zty  0xa010 0x%x!\n", val);
 			zty_c45_write(phydev, 0x01, 0xa010, val|0x01);
 			//zty_c45_write(phydev, 0x01, 0xa010, 0x000);
 		}
