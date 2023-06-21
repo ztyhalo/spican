@@ -1496,7 +1496,14 @@ static int aic3x_i2c_probe(struct i2c_client *i2c,
 	struct device_node *np = i2c->dev.of_node;
 	int ret, i;
 	u32 value;
+	struct pinctrl *pinctrl;
 
+	pinctrl = devm_pinctrl_get_select_default(&i2c->dev);
+	if (IS_ERR(pinctrl)) {
+		dev_err(&i2c->dev, "setup pinctrl failed\n");
+		return PTR_ERR(pinctrl);
+	}
+	
 	aic3x = devm_kzalloc(&i2c->dev, sizeof(struct aic3x_priv), GFP_KERNEL);
 	if (aic3x == NULL) {
 		dev_err(&i2c->dev, "failed to create private data\n");

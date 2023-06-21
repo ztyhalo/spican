@@ -1981,6 +1981,13 @@ static int ov5640_probe(struct i2c_client *client,
 	struct device *dev = &client->dev;
 	int retval;
 	u8 chip_id_high, chip_id_low;
+	struct pinctrl *pinctrl;
+
+	pinctrl = devm_pinctrl_get_select_default(dev);
+	if (IS_ERR(pinctrl)) {
+		dev_err(dev, "setup pinctrl failed\n");
+		return PTR_ERR(pinctrl);
+	}
 
 	/* request power down pin */
 	pwn_gpio = of_get_named_gpio(dev->of_node, "pwn-gpios", 0);
@@ -2102,7 +2109,7 @@ static int ov5640_remove(struct i2c_client *client)
 
 	return 0;
 }
-
+extern uint8_t ktc256sign;
 /*!
  * ov5640 init function
  * Called by insmod ov5640_camera.ko.
@@ -2112,7 +2119,7 @@ static int ov5640_remove(struct i2c_client *client)
 static __init int ov5640_init(void)
 {
 	u8 err;
-
+	if (ktc256sign==0xf0) return 0;
 	err = i2c_add_driver(&ov5640_i2c_driver);
 	if (err != 0)
 		pr_err("%s:driver registration failed, error=%d\n",

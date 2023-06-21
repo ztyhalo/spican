@@ -24,7 +24,9 @@
 #include "clk.h"
 #include "common.h"
 #include "hardware.h"
-
+#include <asm/mach/map.h>
+#include <asm/uaccess.h>
+#include <asm/io.h>
 static const char *step_sels[]	= { "osc", "pll2_pfd2_396m", };
 static const char *pll1_sw_sels[]	= { "pll1_sys", "step", };
 static const char *periph_pre_sels[]	= { "pll2_bus", "pll2_pfd2_396m", "pll2_pfd0_352m", "pll2_198m", };
@@ -124,6 +126,61 @@ static unsigned int share_count_ssi1;
 static unsigned int share_count_ssi2;
 static unsigned int share_count_ssi3;
 static unsigned int share_count_spdif;
+uint8_t ktc256sign=0xff;
+static int read_board_id(void)
+{
+	unsigned int val = 0;
+	void __iomem *wdiomuxc_base = NULL;
+	void __iomem *wdgpio3_base = NULL;
+	void __iomem *wdgpio7_base = NULL;
+	wdiomuxc_base=ioremap(0x020e0000, 4);
+	wdgpio3_base=ioremap(0x020a4000, 4);
+	wdgpio7_base=ioremap(0x020b4000, 4);
+
+/*
+uart3
+#define MX6QDL_PAD_EIM_D25__GPIO3_IO25              0x168 0x538 0x000 0x5 0x0
+#define MX6QDL_PAD_EIM_D24__GPIO3_IO24              0x164 0x534 0x000 0x5 0x0
+uart2
+#define MX6QDL_PAD_SD3_DAT4__GPIO7_IO01             0x324 0x70c 0x000 0x5 0x0
+#define MX6QDL_PAD_SD3_DAT5__GPIO7_IO00             0x328 0x710 0x000 0x5 0x0
+*/
+
+	writel_relaxed(0x5, wdiomuxc_base+0x168);
+	writel_relaxed(0x3080, wdiomuxc_base+0x538);
+	val=readl_relaxed(wdgpio3_base+0x4);
+	val &= ~( 1 << 25);
+	writel_relaxed(val, wdgpio3_base+0x4);
+
+	writel_relaxed(0x5, wdiomuxc_base+0x164);
+	writel_relaxed(0x3080, wdiomuxc_base+0x534);
+	val=readl_relaxed(wdgpio3_base+0x4);
+	val &= ~( 1 << 24);
+	writel_relaxed(val, wdgpio3_base+0x4);
+
+	writel_relaxed(0x5, wdiomuxc_base+0x324);
+	writel_relaxed(0x3080, wdiomuxc_base+0x70c);
+	val=readl_relaxed(wdgpio7_base+0x4);
+	val &= ~( 1 << 1);
+	writel_relaxed(val, wdgpio7_base+0x4);
+
+	writel_relaxed(0x5, wdiomuxc_base+0x328);
+	writel_relaxed(0x3080, wdiomuxc_base+0x710);
+	val=readl_relaxed(wdgpio7_base+0x4);
+	val &= ~( 1 << 0);
+	writel_relaxed(val, wdgpio7_base+0x4);
+
+	val=readl_relaxed(wdgpio3_base);
+	ktc256sign=((val|0xFCFFFFFF)>>22)&ktc256sign;
+	val=readl_relaxed(wdgpio7_base);
+	ktc256sign=(val|0xFFFFFFFC)&ktc256sign;
+	printk("wwwwww ktc256sign = %x\n",ktc256sign);
+
+	iounmap(wdiomuxc_base);
+	iounmap(wdgpio3_base);
+	iounmap(wdgpio7_base);
+	return 0;
+}
 
 static void __init imx6q_clocks_init(struct device_node *ccm_node)
 {
@@ -510,7 +567,7 @@ static void __init imx6q_clocks_init(struct device_node *ccm_node)
 		imx_clk_set_parent(clk[IMX6QDL_CLK_IPU2_SEL], clk[IMX6QDL_CLK_MMDC_CH0_AXI]);
 		imx_clk_set_parent(clk[IMX6QDL_CLK_IPU1_DI0_PRE_SEL], clk[IMX6QDL_CLK_PLL3_PFD1_540M]);
 	}
-
+read_board_id();
 	/*
 	 * The gpmi needs 100MHz frequency in the EDO/Sync mode,
 	 * We can not get the 100MHz from the pll2_pfd0_352m.

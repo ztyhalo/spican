@@ -1043,7 +1043,7 @@ static const struct spi_device_id mcp251x_id_table[] = {
 	{ }
 };
 MODULE_DEVICE_TABLE(spi, mcp251x_id_table);
-
+extern uint8_t ktc256sign;
 static int mcp251x_can_probe(struct spi_device *spi)
 {
 	const struct of_device_id *of_id = of_match_device(mcp251x_of_match,
@@ -1055,7 +1055,7 @@ static int mcp251x_can_probe(struct spi_device *spi)
 	int freq, ret;
 	struct device *dev = &spi->dev;
 //	int rst_gpio = 0;
-
+	if (ktc256sign==0xf0) return 0;
 	//printk("zty mcp251x probe start!\n");
 
 	clk = devm_clk_get(&spi->dev, NULL);
