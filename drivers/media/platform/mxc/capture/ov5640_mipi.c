@@ -2119,7 +2119,7 @@ extern uint8_t ktc256sign;
 static __init int ov5640_init(void)
 {
 	u8 err;
-	if (ktc256sign==0xf0) return 0;
+	if (ktc256sign==0xFF) return 0;
 	err = i2c_add_driver(&ov5640_i2c_driver);
 	if (err != 0)
 		pr_err("%s:driver registration failed, error=%d\n",
