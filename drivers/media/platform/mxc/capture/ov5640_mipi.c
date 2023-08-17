@@ -196,7 +196,7 @@ static struct reg_value ov5640_init_setting_30fps_VGA[] = {
 };
 
 static struct reg_value ov5640_setting_30fps_VGA_640_480[] = {
-
+	{0x4300, 0x6f, 0, 0}, {0x501f, 0x01, 0, 0}, 
 	{0x3035, 0x14, 0, 0}, {0x3036, 0x38, 0, 0}, {0x3c07, 0x08, 0, 0},
 	{0x3c09, 0x1c, 0, 0}, {0x3c0a, 0x9c, 0, 0}, {0x3c0b, 0x40, 0, 0},
 	{0x3820, 0x41, 0, 0}, {0x3821, 0x01, 0, 0}, {0x3814, 0x31, 0, 0},
@@ -2129,7 +2129,9 @@ static int ov5640_probe(struct i2c_client *client,
 
 	ov5640_data.io_init = ov5640_reset;
 	ov5640_data.i2c_client = client;
-	ov5640_data.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+	//ov5640_data.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+	//ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB24;
+	ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB565;
 	ov5640_data.pix.width = 640;
 	ov5640_data.pix.height = 480;
 	ov5640_data.streamcap.capability = V4L2_MODE_HIGHQUALITY |
