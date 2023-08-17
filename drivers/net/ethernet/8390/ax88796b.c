@@ -1513,8 +1513,8 @@ ax88796b_block_input (struct net_device *ndev, int count,
 #else
 	{
 		for (i = 0; i < count; i += 2) {
-			//*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-			*buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
+			*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+			//*buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
 		}
 	}
 #endif

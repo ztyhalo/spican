@@ -1205,7 +1205,7 @@ static int flexcan_chip_start(struct net_device *dev)
 	netdev_dbg(dev, "%s: writing ctrl=0x%08x", __func__, reg_ctrl);
 	flexcan_write(reg_ctrl, &regs->ctrl);
 
-	printk("zty pri can ctrlmode is 0x%x!\n", priv->can.ctrlmode);
+	// printk("zty pri can ctrlmode is 0x%x!\n", priv->can.ctrlmode);
 	/* Abort any pending TX, mark Mailbox as INACTIVE */
 	// flexcan_write(FLEXCAN_MB_CNT_CODE(0x4),
 	// 	      &regs->cantxfg[FLEXCAN_TX_BUF_ID].can_ctrl);

@@ -1122,6 +1122,8 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		}
 
 		/* Set default affinity mask once everything is setup */
+		// if(irq == 142)
+		// 	printk("zty irq mask is 0x%x!\n", mask);
 		setup_affinity(irq, desc, mask);
 
 	} else if (new->flags & IRQF_TRIGGER_MASK) {
