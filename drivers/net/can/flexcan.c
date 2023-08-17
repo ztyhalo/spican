@@ -44,6 +44,8 @@
 
 #define DRV_NAME			"flexcan"
 
+#define IRQ_CAN_RX           1
+
 /* 8 for RX fifo and 2 error handling */
 #define FLEXCAN_NAPI_WEIGHT		(8 + 2)
 
@@ -214,10 +216,25 @@ struct flexcan_stop_mode {
 	u8 ack_gpr;
 	u8 ack_bit;
 };
+
+struct can_rx_offload{
+	struct net_device *dev;
+	unsigned int (*mailbox_read)(struct can_rx_offload * offload, bool drop, 
+				struct sk_buff **skb, u32 * timestamp, unsigned int mb);
+	struct sk_buff_head skb_queue;
+	u32 skb_queue_len_max;
+	unsigned int mb_first;
+	unsigned int mb_last;
+	struct napi_struct napi;
+
+	bool inc;
+};
+
 struct flexcan_priv {
 	struct can_priv can;
 	struct net_device *dev;
 	struct napi_struct napi;
+	struct can_rx_offload offload;
 
 	void __iomem *base;
 	u32 reg_esr;
@@ -433,6 +450,69 @@ static int flexcan_get_berr_counter(const struct net_device *dev,
 	return 0;
 }
 
+
+static int can_rx_offload_napi_poll(struct napi_struct *napi, int quota)
+{
+	struct can_rx_offload *offload = container_of(napi, struct can_rx_offload, napi);
+	struct net_device *dev = offload->dev;
+	struct net_device_stats *stats = &dev->stats;
+	struct sk_buff *skb;
+	int work_done = 0;
+
+	while ((work_done < quota) &&
+	       (skb = skb_dequeue(&offload->skb_queue))) {
+		struct canfd_frame *cf = (struct canfd_frame *)skb->data;
+
+		work_done++;
+		stats->rx_packets++;
+		stats->rx_bytes += cf->len;
+		netif_receive_skb(skb);
+	}
+
+	if (work_done < quota) {
+		// napi_complete_done(napi, work_done);
+		napi_complete(napi);
+
+		/* Check if there was another interrupt */
+		if (!skb_queue_empty(&offload->skb_queue))
+			napi_reschedule(&offload->napi);
+	}
+
+	can_led_event(offload->dev, CAN_LED_EVENT_RX);
+
+	return work_done;
+}
+
+static void can_rx_offload_reset(struct can_rx_offload *offload)
+{
+}
+static int can_rx_offload_init_queue(struct net_device *dev, struct can_rx_offload *offload, unsigned int weight)
+{
+	offload->dev = dev;
+
+	/* Limit queue len to 4x the weight (rounted to next power of two) */
+	offload->skb_queue_len_max = 2 << fls(weight);
+	offload->skb_queue_len_max *= 4;
+	skb_queue_head_init(&offload->skb_queue);
+
+	can_rx_offload_reset(offload);
+	netif_napi_add(dev, &offload->napi, can_rx_offload_napi_poll, weight);
+
+	dev_dbg(dev->dev.parent, "%s: skb_queue_len_max=%d\n",
+		__func__, offload->skb_queue_len_max);
+
+	return 0;
+}
+
+
+int can_rx_offload_add_fifo(struct net_device *dev, struct can_rx_offload *offload, unsigned int weight)
+{
+	// if (!offload->mailbox_read)
+	// 	return -EINVAL;
+
+	return can_rx_offload_init_queue(dev, offload, weight);
+}
+
 static int flexcan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	const struct flexcan_priv *priv = netdev_priv(dev);
@@ -488,33 +568,39 @@ static void do_bus_err(struct net_device *dev,
 
 	if (reg_esr & FLEXCAN_ESR_BIT1_ERR) {
 		netdev_dbg(dev, "BIT1_ERR irq\n");
+		printk("bit1 err irq!\n");
 		cf->data[2] |= CAN_ERR_PROT_BIT1;
 		tx_errors = 1;
 	}
 	if (reg_esr & FLEXCAN_ESR_BIT0_ERR) {
 		netdev_dbg(dev, "BIT0_ERR irq\n");
+		printk("BIT0_ERR irq!\n");
 		cf->data[2] |= CAN_ERR_PROT_BIT0;
 		tx_errors = 1;
 	}
 	if (reg_esr & FLEXCAN_ESR_ACK_ERR) {
 		netdev_dbg(dev, "ACK_ERR irq\n");
+		printk("ACK_ERR irq!\n");
 		cf->can_id |= CAN_ERR_ACK;
 		cf->data[3] |= CAN_ERR_PROT_LOC_ACK;
 		tx_errors = 1;
 	}
 	if (reg_esr & FLEXCAN_ESR_CRC_ERR) {
 		netdev_dbg(dev, "CRC_ERR irq\n");
+		printk("CRC_ERR irq\n");
 		cf->data[2] |= CAN_ERR_PROT_BIT;
 		cf->data[3] |= CAN_ERR_PROT_LOC_CRC_SEQ;
 		rx_errors = 1;
 	}
 	if (reg_esr & FLEXCAN_ESR_FRM_ERR) {
 		netdev_dbg(dev, "FRM_ERR irq\n");
+		printk("FRM_ERR irq\n");
 		cf->data[2] |= CAN_ERR_PROT_FORM;
 		rx_errors = 1;
 	}
 	if (reg_esr & FLEXCAN_ESR_STF_ERR) {
 		netdev_dbg(dev, "STF_ERR irq\n");
+		printk("STF_ERR irq\n");
 		cf->data[2] |= CAN_ERR_PROT_STUFF;
 		rx_errors = 1;
 	}
@@ -736,6 +822,119 @@ static int flexcan_poll(struct napi_struct *napi, int quota)
 
 	return work_done;
 }
+static inline struct flexcan_priv *rx_offload_to_priv(struct can_rx_offload *offload)
+{
+	return container_of(offload, struct flexcan_priv, offload);
+}
+static unsigned int flexcan_mailbox_read(struct can_rx_offload *offload, bool drop,
+					 struct sk_buff **skb, u32 *timestamp,
+					 unsigned int n)
+{
+	// struct flexcan_priv *priv = rx_offload_to_priv(offload);
+	// struct net_device *dev = offload->dev;
+
+	// u32 reg_ctrl, reg_id, reg_iflag1;
+
+	// reg_iflag1 = flexcan_read(&regs->iflag1); 
+	// if (!(reg_iflag1 & FLEXCAN_IFLAG_RX_FIFO_AVAILABLE))
+	// 		return 0;
+	// struct net_device_stats *stats = &dev->stats;
+	// struct can_frame *cf = NULL;
+
+	// *skb = alloc_can_skb(dev, &cf);
+	// if (unlikely(!skb)) {
+	// 	printk("hndz can alloc fail!\n");
+	// 	stats->rx_dropped++;
+	// 	return 0;
+	// }
+
+	// return new_flexcan_read_fifo(dev, cf);
+
+	const struct flexcan_priv *priv = rx_offload_to_priv(offload);
+	struct flexcan_regs __iomem *regs = priv->base;
+	struct flexcan_mb __iomem *mb = &regs->cantxfg[0];
+	u32 reg_ctrl, reg_id, reg_iflag1;
+	// struct canfd_frame *cf = NULL;
+	struct can_frame  *cf = NULL;
+	reg_iflag1 = flexcan_read(&regs->iflag1); 
+	if (!(reg_iflag1 & FLEXCAN_IFLAG_RX_FIFO_AVAILABLE))
+			return 0;
+
+	if (!drop) {
+			*skb = alloc_can_skb(offload->dev,
+					     &cf);
+	}
+	if(*skb && cf)
+	{
+		reg_ctrl = flexcan_read(&mb->can_ctrl);
+		reg_id = flexcan_read(&mb->can_id);
+		if (reg_ctrl & FLEXCAN_MB_CNT_IDE)
+			cf->can_id = ((reg_id >> 0) & CAN_EFF_MASK) | CAN_EFF_FLAG;
+		else
+			cf->can_id = (reg_id >> 18) & CAN_SFF_MASK;
+
+		if (reg_ctrl & FLEXCAN_MB_CNT_RTR)
+			cf->can_id |= CAN_RTR_FLAG;
+		cf->can_dlc = get_can_dlc((reg_ctrl >> 16) & 0xf);
+
+		*(__be32 *)(cf->data + 0) = cpu_to_be32(flexcan_read(&mb->data[0]));
+		*(__be32 *)(cf->data + 4) = cpu_to_be32(flexcan_read(&mb->data[1]));
+	}
+	/* mark as read */
+	flexcan_write(FLEXCAN_IFLAG_RX_FIFO_AVAILABLE, &regs->iflag1);
+	flexcan_read(&regs->timer);
+	return 1;
+
+	//return 1;
+}
+
+static struct sk_buff *can_rx_offload_offload_one(struct can_rx_offload *offload, unsigned int n)
+{
+	struct sk_buff *skb = NULL;
+	u32 timestamp;
+
+	/* If queue is full or skb not available, read to discard mailbox */
+	bool drop = unlikely(skb_queue_len(&offload->skb_queue) >
+					   offload->skb_queue_len_max);
+
+	// if (offload->mailbox_read(offload, drop, &skb, &timestamp, n) && !skb)
+	// 	offload->dev->stats.rx_dropped++;
+	if (flexcan_mailbox_read(offload, drop, &skb, &timestamp, n) && !skb)
+		offload->dev->stats.rx_dropped++;
+
+	// if (skb) {
+	// 	struct can_rx_offload_cb *cb = can_rx_offload_get_cb(skb);
+
+	// 	cb->timestamp = timestamp;
+	// }
+
+	return skb;
+}
+static inline void can_rx_offload_schedule(struct can_rx_offload *offload)
+{
+	napi_schedule(&offload->napi);
+}
+
+// static inline void can_rx_offload_disable(struct can_rx_offload *offload)
+// {
+// 	napi_disable(&offload->napi);
+// }
+int can_rx_offload_irq_offload_fifo(struct can_rx_offload *offload)
+{
+	struct sk_buff *skb;
+	int received = 0;
+	// printk("zty canrx offload!\n");
+	while ((skb = can_rx_offload_offload_one(offload, 0))) {
+		// printk("zty add!\n");
+		skb_queue_tail(&offload->skb_queue, skb);
+		received++;
+	}
+
+	if (received)
+		can_rx_offload_schedule(offload);
+
+	return received;
+}
 
 static irqreturn_t flexcan_irq(int irq, void *dev_id)
 {
@@ -792,6 +991,102 @@ static irqreturn_t flexcan_irq(int irq, void *dev_id)
 	}
 
 	return IRQ_HANDLED;
+}
+
+static irqreturn_t flexcan_napi_irq(int irq, void *dev_id)
+{
+	struct net_device *dev = dev_id;
+	struct net_device_stats *stats = &dev->stats;
+	struct flexcan_priv *priv = netdev_priv(dev);
+	struct flexcan_regs __iomem *regs = priv->base;
+	u32 reg_iflag1, reg_esr;
+	irqreturn_t handled = IRQ_NONE;
+
+	reg_iflag1 = flexcan_read(&regs->iflag1);
+	reg_esr = flexcan_read(&regs->esr);
+	/* ACK all bus error and state change IRQ sources */
+	// if (reg_esr & FLEXCAN_ESR_ALL_INT)
+	// 	flexcan_write(reg_esr & FLEXCAN_ESR_ALL_INT, &regs->esr);
+
+	// if (reg_esr & FLEXCAN_ESR_WAK_INT)
+	// 	flexcan_exit_stop_mode(priv);
+
+	/*
+	 * schedule NAPI in case of:
+	 * - rx IRQ
+	 * - state change IRQ
+	 * - bus error IRQ and bus error reporting is activated
+	 */
+
+	if(reg_iflag1 & FLEXCAN_IFLAG_RX_FIFO_AVAILABLE){
+		handled = IRQ_HANDLED;
+		can_rx_offload_irq_offload_fifo(&priv->offload);
+	}
+
+		/* FIFO overflow */
+	if (reg_iflag1 & FLEXCAN_IFLAG_RX_FIFO_OVERFLOW) {
+		handled = IRQ_HANDLED;
+		flexcan_write(FLEXCAN_IFLAG_RX_FIFO_OVERFLOW, &regs->iflag1);
+		dev->stats.rx_over_errors++;
+		dev->stats.rx_errors++;
+	}
+
+	// if ((reg_iflag1 & FLEXCAN_IFLAG_RX_FIFO_AVAILABLE) ||
+	//     (reg_esr & FLEXCAN_ESR_ERR_STATE) ||
+	//     flexcan_has_and_handle_berr(priv, reg_esr)) {
+	// 	/*
+	// 	 * The error bits are cleared on read,
+	// 	 * save them for later use.
+	// 	 */
+	// 	priv->reg_esr = reg_esr & FLEXCAN_ESR_ERR_BUS;
+	// 	flexcan_write(FLEXCAN_IFLAG_DEFAULT &
+	// 		~FLEXCAN_IFLAG_RX_FIFO_AVAILABLE, &regs->imask1);
+	// 	flexcan_write(priv->reg_ctrl_default & ~FLEXCAN_CTRL_ERR_ALL,
+	// 	       &regs->ctrl);
+	// 	napi_schedule(&priv->napi);
+	// }
+
+	// /* FIFO overflow */
+	// if (reg_iflag1 & FLEXCAN_IFLAG_RX_FIFO_OVERFLOW) {
+	// 	flexcan_write(FLEXCAN_IFLAG_RX_FIFO_OVERFLOW, &regs->iflag1);
+	// 	dev->stats.rx_over_errors++;
+	// 	dev->stats.rx_errors++;
+	// }
+
+	/* transmission complete interrupt */
+	if (reg_iflag1 & (1 << FLEXCAN_TX_BUF_ID)) {
+		handled = IRQ_HANDLED;
+		stats->tx_bytes += can_get_echo_skb(dev, 0);
+		stats->tx_packets++;
+		can_led_event(dev, CAN_LED_EVENT_TX);
+		flexcan_write((1 << FLEXCAN_TX_BUF_ID), &regs->iflag1);
+		netif_wake_queue(dev);
+	}
+
+	if (reg_esr & FLEXCAN_ESR_ALL_INT) {
+		handled = IRQ_HANDLED;
+		flexcan_write(reg_esr & FLEXCAN_ESR_ALL_INT, &regs->esr);
+	}
+
+	if(reg_esr & FLEXCAN_ESR_ERR_STATE)
+	{
+		printk("hndz flexcan FLEXCAN_ESR_ERR_STATE error 0x%x!\n", reg_esr);
+		//error process
+	}
+
+	if(reg_esr & FLEXCAN_ESR_ERR_BUS)
+	{
+		printk("hndz flexcan FLEXCAN_ESR_ERR_BUS error 0x%x!\n", reg_esr);
+		//error process
+	}
+
+	return IRQ_HANDLED;
+}
+
+void can_rx_offload_enable(struct can_rx_offload *offload)
+{
+//	can_rx_offload_reset(offload);
+	napi_enable(&offload->napi);
 }
 
 static void flexcan_set_bittiming(struct net_device *dev)
@@ -910,6 +1205,7 @@ static int flexcan_chip_start(struct net_device *dev)
 	netdev_dbg(dev, "%s: writing ctrl=0x%08x", __func__, reg_ctrl);
 	flexcan_write(reg_ctrl, &regs->ctrl);
 
+	printk("zty pri can ctrlmode is 0x%x!\n", priv->can.ctrlmode);
 	/* Abort any pending TX, mark Mailbox as INACTIVE */
 	// flexcan_write(FLEXCAN_MB_CNT_CODE(0x4),
 	// 	      &regs->cantxfg[FLEXCAN_TX_BUF_ID].can_ctrl);
@@ -1002,9 +1298,18 @@ static int flexcan_open(struct net_device *dev)
 	if (err)
 		goto out_disable_per;
 
+#ifndef IRQ_CAN_RX
 	err = request_irq(dev->irq, flexcan_irq, IRQF_SHARED, dev->name, dev);
 	if (err)
 		goto out_close;
+#else
+	err = request_irq(dev->irq, flexcan_napi_irq, IRQF_SHARED, dev->name, dev);
+	if (err)
+		goto out_close;
+ 	err = can_rx_offload_add_fifo(dev, &priv->offload, FLEXCAN_NAPI_WEIGHT);
+	if(err)
+		goto out_free_irq;
+#endif
 
 	/* start chip and queuing */
 	err = flexcan_chip_start(dev);
@@ -1012,8 +1317,11 @@ static int flexcan_open(struct net_device *dev)
 		goto out_free_irq;
 
 	can_led_event(dev, CAN_LED_EVENT_OPEN);
-
+#ifndef IRQ_CAN_RX
 	napi_enable(&priv->napi);
+#else
+	can_rx_offload_enable(&priv->offload);
+#endif
 	netif_start_queue(dev);
 
 	return 0;
@@ -1278,9 +1586,9 @@ static int flexcan_probe(struct platform_device *pdev)
 	priv->reg_xceiver = devm_regulator_get(&pdev->dev, "xceiver");
 	if (IS_ERR(priv->reg_xceiver))
 		priv->reg_xceiver = NULL;
-
+#ifndef IRQ_CAN_RX
 	netif_napi_add(dev, &priv->napi, flexcan_poll, FLEXCAN_NAPI_WEIGHT);
-
+#endif
 	platform_set_drvdata(pdev, dev);
 	SET_NETDEV_DEV(dev, &pdev->dev);
 

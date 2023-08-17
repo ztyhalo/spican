@@ -285,7 +285,7 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	/* startup the audio subsystem */
 //	printk("soc pcm open start!\n");
 	if (cpu_dai->driver->ops && cpu_dai->driver->ops->startup) {
-		printk("cpu dai driver name %s %pF!\n", cpu_dai->driver->name, cpu_dai->driver->ops->startup);
+		//printk("cpu dai driver name %s %pF!\n", cpu_dai->driver->name, cpu_dai->driver->ops->startup);
 		ret = cpu_dai->driver->ops->startup(substream, cpu_dai);
 		if (ret < 0) {
 			dev_err(cpu_dai->dev, "ASoC: can't open interface"
@@ -297,8 +297,8 @@ static int soc_pcm_open(struct snd_pcm_substream *substream)
 	}
 
 //	printk("platform driver start!\n");
-	if(platform && platform->name)
-		printk("platform  name %s !\n", platform->name);
+	// if(platform && platform->name)
+	// 	printk("platform  name %s !\n", platform->name);
 	if (platform->driver->ops && platform->driver->ops->open) {
 		ret = platform->driver->ops->open(substream);
 		if (ret < 0) {
