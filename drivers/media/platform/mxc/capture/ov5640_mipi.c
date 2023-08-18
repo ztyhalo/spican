@@ -35,6 +35,7 @@
 #include <media/v4l2-chip-ident.h>
 #include "v4l2-int-device.h"
 #include "mxc_v4l2_capture.h"
+#include "ov5640af.h"
 
 #define OV5640_VOLTAGE_ANALOG               2800000
 #define OV5640_VOLTAGE_DIGITAL_CORE         1500000
@@ -123,7 +124,7 @@ static struct reg_value ov5640_init_setting_30fps_VGA[] = {
 	{0x3c01, 0xa4, 0, 0}, {0x3c04, 0x28, 0, 0}, {0x3c05, 0x98, 0, 0},
 	{0x3c06, 0x00, 0, 0}, {0x3c07, 0x08, 0, 0}, {0x3c08, 0x00, 0, 0},
 	{0x3c09, 0x1c, 0, 0}, {0x3c0a, 0x9c, 0, 0}, {0x3c0b, 0x40, 0, 0},
-	{0x3820, 0x41, 0, 0}, {0x3821, 0x07, 0, 0}, {0x3814, 0x31, 0, 0},
+	{0x3820, 0x41, 0, 0}, {0x3821, 0x01, 0, 0}, {0x3814, 0x31, 0, 0},
 	{0x3815, 0x31, 0, 0}, {0x3800, 0x00, 0, 0}, {0x3801, 0x00, 0, 0},
 	{0x3802, 0x00, 0, 0}, {0x3803, 0x04, 0, 0}, {0x3804, 0x0a, 0, 0},
 	{0x3805, 0x3f, 0, 0}, {0x3806, 0x07, 0, 0}, {0x3807, 0x9b, 0, 0},
@@ -195,10 +196,10 @@ static struct reg_value ov5640_init_setting_30fps_VGA[] = {
 };
 
 static struct reg_value ov5640_setting_30fps_VGA_640_480[] = {
-
+	{0x4300, 0x6f, 0, 0}, {0x501f, 0x01, 0, 0}, 
 	{0x3035, 0x14, 0, 0}, {0x3036, 0x38, 0, 0}, {0x3c07, 0x08, 0, 0},
 	{0x3c09, 0x1c, 0, 0}, {0x3c0a, 0x9c, 0, 0}, {0x3c0b, 0x40, 0, 0},
-	{0x3820, 0x41, 0, 0}, {0x3821, 0x07, 0, 0}, {0x3814, 0x31, 0, 0},
+	{0x3820, 0x41, 0, 0}, {0x3821, 0x01, 0, 0}, {0x3814, 0x31, 0, 0},
 	{0x3815, 0x31, 0, 0}, {0x3800, 0x00, 0, 0}, {0x3801, 0x00, 0, 0},
 	{0x3802, 0x00, 0, 0}, {0x3803, 0x04, 0, 0}, {0x3804, 0x0a, 0, 0},
 	{0x3805, 0x3f, 0, 0}, {0x3806, 0x07, 0, 0}, {0x3807, 0x9b, 0, 0},
@@ -219,7 +220,7 @@ static struct reg_value ov5640_setting_30fps_VGA_640_480[] = {
 static struct reg_value ov5640_setting_15fps_VGA_640_480[] = {
 	{0x3035, 0x22, 0, 0}, {0x3036, 0x38, 0, 0}, {0x3c07, 0x08, 0, 0},
 	{0x3c09, 0x1c, 0, 0}, {0x3c0a, 0x9c, 0, 0}, {0x3c0b, 0x40, 0, 0},
-	{0x3820, 0x41, 0, 0}, {0x3821, 0x07, 0, 0}, {0x3814, 0x31, 0, 0},
+	{0x3820, 0x41, 0, 0}, {0x3821, 0x01, 0, 0}, {0x3814, 0x31, 0, 0},
 	{0x3815, 0x31, 0, 0}, {0x3800, 0x00, 0, 0}, {0x3801, 0x00, 0, 0},
 	{0x3802, 0x00, 0, 0}, {0x3803, 0x04, 0, 0}, {0x3804, 0x0a, 0, 0},
 	{0x3805, 0x3f, 0, 0}, {0x3806, 0x07, 0, 0}, {0x3807, 0x9b, 0, 0},
@@ -1308,7 +1309,64 @@ static int ov5640_change_mode_direct(enum ov5640_frame_rate frame_rate,
 err:
 	return retval;
 }
+static int ov5640_auto_focus(void)
+{
+        u16 addr = 0x8000;
+        u16 i;
+        u8 state = 0x8F;
+        u8 temp = 0;
+        u16 retry = 0;
 
+        ov5640_write_reg(0x3000, 0x20);
+
+        for (i = 0; i < sizeof(OV5640_AF_Config); i++) {
+            ov5640_write_reg(addr, OV5640_AF_Config[i]);
+            addr++;
+        }
+
+        ov5640_write_reg(0x3022, 0x00);
+        ov5640_write_reg(0x3023, 0x00);
+        ov5640_write_reg(0x3024, 0x00);
+        ov5640_write_reg(0x3025, 0x00);
+        ov5640_write_reg(0x3026, 0x00);
+        ov5640_write_reg(0x3027, 0x00);
+        ov5640_write_reg(0x3028, 0x00);
+        ov5640_write_reg(0x3029, 0x7f);
+        ov5640_write_reg(0x3000, 0x00);
+
+        i = 0;
+
+        do {
+            ov5640_read_reg(0x3029, &state);
+            msleep(5);
+            i++;
+            if (i > 1000) return 1;
+        } while(state != 0x70);
+
+        ov5640_write_reg(0x3023, 0x01);
+        ov5640_write_reg(0x3022, 0x08);
+
+        do {
+            ov5640_read_reg(0x3023, &temp);
+            retry++;
+            if (retry > 1000) return 2;
+            msleep(5);
+        } while (temp != 0x00);
+
+        ov5640_write_reg(0x3023, 0x01);
+        ov5640_write_reg(0x3022, 0x04);
+
+        retry = 0;
+
+        do {
+            ov5640_read_reg(0x3023, &temp);
+            retry++;
+            if (retry > 1000) return 2;
+            msleep(5);
+        } while (temp != 0x00);
+
+        return 0;
+}
 static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
 			    enum ov5640_mode mode, enum ov5640_mode orig_mode)
 {
@@ -1714,11 +1772,36 @@ static int ioctl_s_ctrl(struct v4l2_int_device *s, struct v4l2_control *vc)
 		 vc->id);
 
 	switch (vc->id) {
+	case V4L2_CID_FOCUS_AUTO:
+		ov5640_auto_focus();
+		break;
 	case V4L2_CID_BRIGHTNESS:
+		if (vc->value >= 0) {
+			ov5640_write_reg(0x5001, 0xFF);
+			ov5640_write_reg(0x5587, vc->value << 4);
+			ov5640_write_reg(0x5580, 0x04);
+			ov5640_write_reg(0x5588, 0x01);
+		}else{
+			ov5640_write_reg(0x5001, 0xFF);
+			ov5640_write_reg(0x5587, vc->value << 4);
+			ov5640_write_reg(0x5580, 0x04);
+			ov5640_write_reg(0x5588, 0x09);
+		}
 		break;
 	case V4L2_CID_CONTRAST:
+		ov5640_write_reg(0x5001, 0xFF);
+		ov5640_write_reg(0x5580, 0x04);
+		ov5640_write_reg(0x5586, 0x20+vc->value*4);
+		ov5640_write_reg(0x5585, 0x20+vc->value*4);
+		ov5640_write_reg(0x5588, 0x41);
+
 		break;
 	case V4L2_CID_SATURATION:
+		ov5640_write_reg(0x5001, 0xFF);
+		ov5640_write_reg(0x5583, 0x40+0x10*vc->value);
+		ov5640_write_reg(0x5584, 0x40+0x10*vc->value);
+		ov5640_write_reg(0x5580, 0x02);
+		ov5640_write_reg(0x5588, 0x41);
 		break;
 	case V4L2_CID_HUE:
 		break;
@@ -2046,7 +2129,9 @@ static int ov5640_probe(struct i2c_client *client,
 
 	ov5640_data.io_init = ov5640_reset;
 	ov5640_data.i2c_client = client;
-	ov5640_data.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+	//ov5640_data.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+	//ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB24;
+	ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB565;
 	ov5640_data.pix.width = 640;
 	ov5640_data.pix.height = 480;
 	ov5640_data.streamcap.capability = V4L2_MODE_HIGHQUALITY |
