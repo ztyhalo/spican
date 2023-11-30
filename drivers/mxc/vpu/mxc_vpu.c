@@ -893,9 +893,10 @@ static int vpu_dev_probe(struct platform_device *pdev)
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 5, 0)
 	struct device_node *np = pdev->dev.of_node;
-	u32 iramsize;
+	u32 iramsize = 0;
 
 	err = of_property_read_u32(np, "iramsize", (u32 *)&iramsize);
+	printk("zty iramsize is 0x%x!\n", iramsize);
 	if (!err && iramsize)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0)
 	{

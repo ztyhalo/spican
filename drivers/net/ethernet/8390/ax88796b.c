@@ -1130,6 +1130,7 @@ restart:
 		mdio_write (ndev, 0x10, 0x16, 0x4044);
 		if (rty_cnt == 0) {
 			PRINTK (DRIVER_MSG, PFX "Restore PHY default setting");
+			rty_cnt = 1;
 		} else if (++rty_cnt > 10) {
 			PRINTK (ERROR_MSG, PFX
 				"Failed to restore PHY default setting");
