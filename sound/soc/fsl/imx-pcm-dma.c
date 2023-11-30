@@ -50,11 +50,33 @@ static const struct snd_pcm_hardware imx_pcm_hardware = {
 
 static void imx_pcm_dma_complete(void *arg)
 {
-	struct snd_pcm_substream *substream = arg;
-	struct snd_soc_pcm_runtime *rtd = substream->private_data;
-	struct dmaengine_pcm_runtime_data *prtd = substream->runtime->private_data;
+	struct snd_pcm_substream *substream = NULL;
+	struct snd_soc_pcm_runtime *rtd = NULL;
+	struct dmaengine_pcm_runtime_data *prtd = NULL;
 	struct snd_dmaengine_dai_dma_data *dma_data;
 
+	if(arg != NULL)
+		substream = arg;
+	else
+	{
+		printk("zty arg is null!\n");
+		return;
+	}
+	if(substream->private_data != NULL)
+		rtd = substream->private_data;
+	else
+	{
+		printk("zty  substream->private_data is null!\n");
+		return;
+	}
+
+	if(substream->runtime != NULL && substream->runtime->private_data != NULL)
+		prtd = substream->runtime->private_data;
+	else
+	{
+		printk("zty substream->runtime->private_data is null!\n");
+		return;
+	}
 	prtd->pos += snd_pcm_lib_period_bytes(substream);
 	if (prtd->pos >= snd_pcm_lib_buffer_bytes(substream))
 		prtd->pos = 0;
