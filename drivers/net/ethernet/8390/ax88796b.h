@@ -162,6 +162,8 @@ struct ax_device {
 #define EN0_RESET		EI_SHIFT(0X1f)	/* Issue a read to reset, a write to clear. */
 
 #define EN0_DATA_ADDR		0x0800
+#define EN0_DATA_ADDR_T		0x0040
+
 
 #define ENVLAN_ENABLE		0x08
 

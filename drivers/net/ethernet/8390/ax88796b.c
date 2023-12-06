@@ -50,6 +50,10 @@
 #include <linux/inetdevice.h>
 #include "ax88796b.h"
 
+#include <linux/dma-mapping.h>
+#include <linux/dmaengine.h>
+#include <linux/platform_data/dma-imx.h>
+
 /* NAMING CONSTANT DECLARATIONS */
 #define DRV_NAME	"AX88796B"
 #define ADP_NAME	"ASIX AX88796B Ethernet Adapter"
@@ -87,6 +91,22 @@ static int mem = 0;
 static int irq = 0;
 static int weight = 0;
 
+#define EIM_CS0_PHY_START_ADDR 0x08000000
+
+static struct dma_chan * dma_m2m_chan;
+static struct completion dma_m2m_ok;
+static unsigned char * eimbuf = NULL;
+static unsigned char * eimrxbuf = NULL;
+// static unsigned char * eimbuf = NULL;
+struct tasklet_struct tasklet_eim_send;			//中断下半部，用来write EIM
+struct tasklet_struct tasklet_eim_rx;			//中断下半部，用来write EIM
+dma_addr_t dma_src = 0;	
+dma_addr_t dma_dst = 0;
+unsigned int eim_send_length;
+unsigned int eim_rx_length;
+
+static int sdma_read_ok = 0;
+
 module_param (mem, int, 0);
 module_param (irq, int, 0);
 module_param (media, int, 0);
@@ -104,6 +124,8 @@ MODULE_LICENSE ("GPL");
 #define AX88796_RESET			IMX_GPIO_NR(6, 6)
 
 static int ax_get_link (struct ax_device *ax_local);
+static void 
+ax_trigger_send (struct net_device *ndev, unsigned int length, int start_page);
 
 #if (CONFIG_AX88796B_8BIT_WIDE == 1)
 static inline u16 READ_FIFO (void *membase)
@@ -144,6 +166,322 @@ static inline struct ax_device *ax_get_priv (struct net_device *ndev)
 #define MDIO_DATA_READ		0x04
 #define MDIO_MASK		0x0f
 #define MDIO_ENB_IN		0x02
+
+static void dma_m2m_tx_callback(void *data);
+static void dma_m2m_rx_callback(void *data);
+static bool dma_m2m_filter(struct dma_chan *chan, void *param)
+{
+	if (!imx_dma_is_general_purpose(chan))
+		return false;
+	chan->private = param;
+	return true;
+}
+
+
+static int sdma_open(void)
+{
+	dma_cap_mask_t dma_m2m_mask;
+	struct imx_dma_data m2m_dma_data = {0};
+
+
+	init_completion(&dma_m2m_ok);
+
+
+	dma_cap_zero(dma_m2m_mask);
+	dma_cap_set(DMA_SLAVE, dma_m2m_mask);
+	m2m_dma_data.peripheral_type = IMX_DMATYPE_MEMORY;
+	m2m_dma_data.priority = DMA_PRIO_HIGH;
+
+	dma_m2m_chan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
+	if (!dma_m2m_chan) {
+		printk("Error opening the SDMA memory to memory channel\n");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+//在上一个tasklet没有执行完毕时，不会马上重入，但是dma不能马上传输完毕，同时在tasklet里面不能延时，因此需要防止重入
+// static inline void tasklet_eim_rev_handle(unsigned long data)
+// {
+// 	struct dma_async_tx_descriptor *dma_m2m_desc = NULL;	
+// 	struct dma_slave_config dma_m2m_config = {0};
+	
+// 	if(eimbuf == NULL || dma_m2m_chan == NULL)
+// 	{
+// 		printk("%s %s %d pointer is NULL !\n", __FILE__, __func__, __LINE__);
+// 		return ;
+// 	}
+	
+	
+// 	//将内存映射为dma需要的地址信息
+// 	dma_dst = dma_map_single(NULL, &eimbuf[RX_BUFF_START_ADDR], RX_BUFF_SIZE, DMA_MEM_TO_MEM);
+	
+// 	//配置dma
+// 	dma_m2m_config.direction = DMA_MEM_TO_MEM;
+// 	dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+// 	dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+// 	dma_m2m_config.src_addr = (EIM_CS0_PHY_START_ADDR + eim_rev_addr_offset);
+// 	dma_m2m_config.dst_addr = dma_dst;
+// 	dmaengine_slave_config(dma_m2m_chan, &dma_m2m_config);
+
+
+// 	//获取dma描述符
+// 	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, dma_dst, (EIM_CS0_PHY_START_ADDR + eim_rev_addr_offset), RX_BUFF_SIZE, DMA_MEM_TO_MEM);
+// 	if (!dma_m2m_desc)
+// 		printk("prep error!!\n");
+
+// 	//设置dma传输完成的回调函数	
+// 	dma_m2m_desc->callback = dma_m2m_rx_callback;
+// 	dmaengine_submit(dma_m2m_desc);
+// 	dma_async_issue_pending(dma_m2m_chan);	
+// 	spin_unlock(&eim_rw_lock);
+// }
+
+//tasklet发送任务
+//发送和接收tasklet需要使用锁进行同步
+static inline void tasklet_eim_send_handle(unsigned long data)
+{
+	struct dma_async_tx_descriptor *dma_m2m_desc;	
+	struct dma_slave_config dma_m2m_config = {0};
+	printk("zty handle start!\n");
+	if(eimbuf == NULL || dma_m2m_chan == NULL)
+	{
+		printk("%s %s %d pointer is NULL !\n", __FILE__, __func__, __LINE__);
+		return ;
+	}
+	// spin_lock(&eim_rw_lock);
+
+	//将内存映射为dma需要的地址信息 写从eimbuf的0x80000开始　前面的内存给读用
+	// dma_src = dma_map_single(NULL, eimbuf, 2048, DMA_MEM_TO_MEM);
+	dma_src = dma_map_single(NULL, eimbuf, 2048, DMA_MEM_TO_DEV);
+	//配置dma
+	// dma_m2m_config.direction = DMA_MEM_TO_MEM;
+	dma_m2m_config.direction = DMA_MEM_TO_DEV;
+	dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	dma_m2m_config.src_addr = dma_src;
+	dma_m2m_config.dst_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+	dmaengine_slave_config(dma_m2m_chan, &dma_m2m_config);
+
+	printk("zty eim phy addr 0x%x!\n", EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+	//获取dma描述符
+	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, 
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)), dma_src, eim_send_length, DMA_MEM_TO_DEV);													
+	if (!dma_m2m_desc)
+		printk("prep error!!\n");
+	
+	//设置dma传输完成后的回调函数	
+	dma_m2m_desc->callback = dma_m2m_tx_callback;
+	dma_m2m_desc->callback_param = data;
+	dmaengine_submit(dma_m2m_desc);
+	dma_async_issue_pending(dma_m2m_chan);	
+	// spin_unlock(&eim_rw_lock);
+
+	// wait_for_completion(&dma_m2m_ok);
+	return ;
+}
+static inline void tasklet_eim_rx_handle(unsigned long data)
+{
+	struct dma_async_tx_descriptor *dma_m2m_desc;	
+	struct dma_slave_config dma_m2m_config = {0};
+	printk("zty rx handle start!\n");
+	if(eimbuf == NULL || dma_m2m_chan == NULL)
+	{
+		printk("%s %s %d pointer is NULL !\n", __FILE__, __func__, __LINE__);
+		return ;
+	}
+	// spin_lock(&eim_rw_lock);
+
+	//将内存映射为dma需要的地址信息 写从eimbuf的0x80000开始　前面的内存给读用
+	// dma_src = dma_map_single(NULL, eimbuf, 2048, DMA_MEM_TO_MEM);
+	dma_dst = dma_map_single(NULL, eimrxbuf, 2048, DMA_DEV_TO_MEM);
+	//配置dma
+	// dma_m2m_config.direction = DMA_MEM_TO_MEM;
+	dma_m2m_config.direction = DMA_DEV_TO_MEM;
+	dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	dma_m2m_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));;
+	dma_m2m_config.dst_addr = dma_dst;
+	dmaengine_slave_config(dma_m2m_chan, &dma_m2m_config);
+
+	printk("zty eim phy addr 0x%x!\n", EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+	//获取dma描述符
+	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, dma_dst,
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  eim_rx_length, DMA_DEV_TO_MEM);													
+	if (!dma_m2m_desc)
+		printk("prep error!!\n");
+	
+	//设置dma传输完成后的回调函数	
+	dma_m2m_desc->callback = dma_m2m_rx_callback;
+	dma_m2m_desc->callback_param = data;
+	printk("zty eim submit start 0x%lx!\n", jiffies);
+	dmaengine_submit(dma_m2m_desc);
+	dma_async_issue_pending(dma_m2m_chan);	
+	// spin_unlock(&eim_rw_lock);
+
+	// wait_for_completion(&dma_m2m_ok);
+	return ;
+}
+
+static int eim_sdma_init(void * para)
+{
+	eimbuf = kzalloc(2048, GFP_DMA);
+	if(!eimbuf)
+	{
+		printk("error eimbuf!!!\n");
+		return -1;
+	}
+	eimrxbuf = kzalloc(2048, GFP_DMA);
+	memset(eimbuf, 0x00, 2048);
+	memset(eimrxbuf, 0x00, 2048);
+	tasklet_init(&tasklet_eim_send, tasklet_eim_send_handle, (unsigned int)para);	
+	tasklet_init(&tasklet_eim_rx, tasklet_eim_rx_handle, (unsigned int)para);
+}
+
+
+
+int sdma_release(struct inode * inode, struct file * filp)
+{
+	dma_release_channel(dma_m2m_chan);
+	dma_m2m_chan = NULL;
+	// dma_free_coherent(NULL, SDMA_BUF_SIZE, wbuf, wpaddr);
+
+
+	return 0;
+}
+
+
+//DMA回调函数
+static void dma_m2m_tx_callback(void *data)
+{
+	struct net_device *ndev = (struct net_device *)data;
+	if(ndev == NULL)
+	{
+		printk("zty callback data error!\n");
+	}
+	printk("zty dma send end!\n");
+	complete(&dma_m2m_ok);
+	dma_unmap_single(NULL, dma_src, 2048, DMA_MEM_TO_DEV);
+
+ 	struct ax_device *ax_local = ax_get_priv (ndev);
+    void *ax_base = ax_local->membase;
+
+		if ((readb(ax_base + ADDR_SHIFT16(EN0_ISR)) & 0x40) == 0) {
+
+			PRINTK (ERROR_MSG, PFX
+				" timeout waiting for Tx RDC.\n");
+		}
+		else
+			printk("zty write ok!\n");
+	
+	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
+
+	// ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	ax_trigger_send (ndev, eim_send_length, ax_local->tx_curr_page);
+	// if (free_pages == need_pages) {
+	// 	netif_stop_queue (ndev);
+	// 	ax_local->tx_full = 1;
+	// }
+	// ax_local->tx_prev_ctepr = ctepr;
+	// ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+	// 	ax_local->tx_stop_page) ? 
+	// 	(ax_local->tx_curr_page + need_pages) : 
+	// 	(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+	// 	 + ax_local->tx_start_page);
+
+	ax_local->irqlock = 0;	
+	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+
+	return ;
+}
+
+//DMA回调函数
+static void dma_m2m_rx_callback(void *data)
+{
+	int i = 0;
+	struct net_device *ndev = (struct net_device *)data;
+	if(ndev == NULL)
+	{
+		printk("zty callback data error!\n");
+	}
+	printk("zty dma rx end %d jj 0x%lx!\n", eim_rx_length, jiffies);
+	for(i = 0; i < eim_rx_length;i++)
+	{
+		printk("0x%x ", eimrxbuf[i]);
+	}
+	printk("\n");
+	complete(&dma_m2m_ok);
+	dma_unmap_single(NULL, dma_dst, 2048, DMA_DEV_TO_MEM);
+
+ 	struct ax_device *ax_local = ax_get_priv (ndev);
+    void *ax_base = ax_local->membase;
+
+	sdma_read_ok = 1;
+		
+	return ;
+}
+
+
+
+int sdma_eim_write(unsigned char * src, unsigned int size)
+{
+
+	// struct dma_async_tx_descriptor *dma_m2m_desc;
+	// struct dma_slave_config dma_m2m_config = {0};	
+	int i = 0;
+	memcpy(eimbuf, src, size);
+	eim_send_length = size;
+	printk("zty send size %d!\n",size);
+	
+	for(i = 0; i < 12 ;i++)
+	{
+		printk("0x%x ", eimbuf[i]);
+	}
+	printk("\n");
+	tasklet_schedule(&tasklet_eim_send);	
+	// dma_src = dma_map_single(NULL, eimbuf, 2048, DMA_MEM_TO_MEM);
+
+	// 	//配置dma
+	//  dma_m2m_config.direction = DMA_MEM_TO_MEM;
+	// // dma_m2m_config.direction = DMA_MEM_TO_DEV;
+	// dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	// dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	// dma_m2m_config.src_addr = dma_src;
+	// dma_m2m_config.dst_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+	// dmaengine_slave_config(dma_m2m_chan, &dma_m2m_config);
+
+	// //获取dma描述符
+	// dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, 
+	//                 (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)), dma_src, size, DMA_MEM_TO_MEM);													
+	// if (!dma_m2m_desc)
+	// 	printk("prep error!!\n");
+	
+	// //设置dma传输完成后的回调函数	
+	// dma_m2m_desc->callback = dma_m2m_tx_callback;
+	// dmaengine_submit(dma_m2m_desc);
+	// dma_async_issue_pending(dma_m2m_chan);
+
+	// wait_for_completion(&dma_m2m_ok);	
+	return ;
+
+}
+
+int sdma_eim_read( unsigned int size)
+{
+
+	// struct dma_async_tx_descriptor *dma_m2m_desc;
+	// struct dma_slave_config dma_m2m_config = {0};	
+	int i = 0;
+
+	eim_rx_length = size;
+	printk("zty rx size %d!\n",size);
+	
+	// tasklet_schedule(&tasklet_eim_rx);	
+
+	return ;
+
+}
 
 /*
  * ----------------------------------------------------------------------------
@@ -500,8 +838,11 @@ static void ax88796b_dump_phy_regs (struct ax_device *ax_local)
 static void 
 ax_block_output (struct net_device *ndev, int count,
 		 const unsigned char *buf, const int start_page);
+
 static void 
-ax_trigger_send (struct net_device *ndev, unsigned int length, int start_page);
+ax_block_dma_output (struct net_device *ndev, int count,
+		 const unsigned char *buf, const int start_page);
+
 
 
 void get_ip_addr(struct net_device *ndev, char * address)
@@ -614,21 +955,22 @@ static int ax88796b_send_data (struct net_device *ndev)
 		return NETDEV_TX_BUSY;
 	}
 
-	ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-	if (free_pages == need_pages) {
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-	}
-	ax_local->tx_prev_ctepr = ctepr;
-	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-		ax_local->tx_stop_page) ? 
-		(ax_local->tx_curr_page + need_pages) : 
-		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-		 + ax_local->tx_start_page);
+	ax_block_dma_output(ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	// ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	// ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+	// if (free_pages == need_pages) {
+	// 	netif_stop_queue (ndev);
+	// 	ax_local->tx_full = 1;
+	// }
+	// ax_local->tx_prev_ctepr = ctepr;
+	// ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+	// 	ax_local->tx_stop_page) ? 
+	// 	(ax_local->tx_curr_page + need_pages) : 
+	// 	(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+	// 	 + ax_local->tx_start_page);
 
-	ax_local->irqlock = 0;	
-	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+	// ax_local->irqlock = 0;	
+	// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 
 	spin_unlock_irqrestore (&ax_local->page_lock, flags);
 
@@ -1470,6 +1812,7 @@ ax88796b_get_hdr (struct net_device *ndev,
  * Purpose:
  * ----------------------------------------------------------------------------
  */
+static int debugPrint = 0;
 static void 
 ax88796b_block_input (struct net_device *ndev, int count,
 			struct sk_buff *skb, int ring_offset)
@@ -1513,14 +1856,43 @@ ax88796b_block_input (struct net_device *ndev, int count,
 	}
 #else
 	{
-		for (i = 0; i < count; i += 2) {
-			*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-			//*buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
+		if(debugPrint == 0)
+		{
+			sdma_eim_read(count +2);
+			tasklet_eim_rx_handle(ndev);
+			printk("zty tasklet_eim_rx_handle end!\n");
+			debugPrint = 1;
+			//while (sdma_read_ok == 0);
+
+		}
+		else
+		{
+			if(debugPrint < 6)
+			{
+				printk("read %d start 0x%lx!\n", count, jiffies);
+			}
+			for (i = 0; i < count; i += 2) {
+				*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+				//*buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
+			}
+			if(debugPrint < 6)
+			{
+				printk("read end 0x%lx!\n", jiffies);
+				debugPrint++;
+			}
 		}
 	}
 #endif
 
 	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
+	// if(debugPrint == 0)
+	// {
+	// 	printk("zty receive size 0x%x!\n", count);
+	// 	for(i = 0; i < count; i++)
+	// 		printk("0x%x ", ((u8 *)skb->data)[i]);
+	// 	printk("\n");
+	// 	debugPrint = 1;
+	// }
 	ax_local->dmaing = 0;
 }
 
@@ -1600,6 +1972,68 @@ ax_block_output (struct net_device *ndev, int count,
 		}
 	}
 	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
+
+	ax_local->dmaing = 0;
+	return;
+}
+
+static void 
+ax_block_dma_output (struct net_device *ndev, int count,
+		 const unsigned char *buf, const int start_page)
+{
+    struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+	unsigned long dma_start;
+	int i = 0;
+	/* This shouldn't happen. If it does, it's the last thing you'll see */
+	if (ax_local->dmaing)
+	{
+		PRINTK (ERROR_MSG, PFX " DMAing conflict in ne_block_output."
+			"[DMAstat:%d][irqlock:%d]\n",
+			ax_local->dmaing, ax_local->irqlock);
+		return;
+	}
+
+	ax_local->dmaing |= 0x01;
+
+	/* Now the normal output. */
+
+		writeb (count & 0xff, ax_base + ADDR_SHIFT16(EN0_RCNTLO));
+
+
+	writeb (count >> 8,   ax_base + ADDR_SHIFT16(EN0_RCNTHI));
+	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RSARLO));
+	writeb (start_page, ax_base + ADDR_SHIFT16(EN0_RSARHI));
+
+	writeb (E8390_RWRITE, ax_base + ADDR_SHIFT16(E8390_CMD));
+	printk("zty ax_base 0x%x, 0x%x, 0x%x 0x%x!\n",ax_base, ADDR_SHIFT16(EN0_DATA_ADDR), ADDR_SHIFT16(EN0_DATAPORT),
+	    ADDR_SHIFT16(EN0_DATA_ADDR_T));
+
+ #if (CONFIG_AX88796B_USE_MEMCPY == 1)
+	memcpy ((ax_base + ADDR_SHIFT16(EN0_DATA_ADDR)), buf, ((count+ 3) & 0x7FC));
+#else
+	{
+		// u16 i;
+		// for (i = 0; i < count; i += 2) {
+		// 	//WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
+		// 	*((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
+		// }
+		 sdma_eim_write(buf, count);
+		// memcpy ((ax_base + ADDR_SHIFT16(EN0_DATA_ADDR_T)), buf, ((count+ 3) & 0x7FC));
+	}
+#endif
+
+	// dma_start = jiffies;
+	// while ((readb(ax_base + ADDR_SHIFT16(EN0_ISR)) & 0x40) == 0) {
+	// 	if (jiffies - dma_start > 2*HZ/100) {		/* 20ms */
+	// 		PRINTK (ERROR_MSG, PFX
+	// 			" timeout waiting for Tx RDC.\n");
+	// 		ax88796b_reset (ndev);
+	// 		ax88796b_init (ndev, 1);
+	// 		break;
+	// 	}
+	// }
+	// writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
 
 	ax_local->dmaing = 0;
 	return;
@@ -2391,6 +2825,8 @@ static int ax88796b_drv_probe(struct platform_device *pdev)
 		goto release_region;
 	}
 
+
+
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, REG_EIM);
 	if (!res) {
 		printk("%s: get no resource !\n", DRV_NAME);
@@ -2445,6 +2881,9 @@ static int ax88796b_drv_probe(struct platform_device *pdev)
 	ax_local = ax_get_priv (ndev);
 	ax_local->membase = addr;
  	ax_local->ndev = ndev;
+
+	eim_sdma_init(ndev);
+	sdma_open();
 
 	//printk("zty ax_probe before!\n");
 	ret = ax_probe (ndev, ax_local);
