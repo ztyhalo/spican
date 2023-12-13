@@ -100,7 +100,7 @@ struct ax_device {
 
 /* Some generic ethernet register configurations. */
 
-#define E8390_RXCONFIG		0x4	/* EN0_RXCR: broadcasts, no multicast,errors */
+#define E8390_RXCONFIG		0x0	/* EN0_RXCR: broadcasts, no multicast,errors */
 #define E8390_RXOFF		0x20	/* EN0_RXCR: Accept no packets */
 #define E8390_TXCONFIG		0x80	/* EN0_TXCR: Normal transmit mode */
 #define E8390_TXOFF		0x02	/* EN0_TXCR: Transmitter off */

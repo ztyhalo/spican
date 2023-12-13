@@ -80,11 +80,16 @@
 static char version[] =
 KERN_INFO ADP_NAME ":v" DRV_VERSION "\n";
 
+// #define AX88796_SDMA_MODE 1
+
 struct imx_weim_devtype {
 	unsigned int	cs_index;
 	unsigned int	cs_regs_count;
 	unsigned int	cs_stride;
 };
+
+
+static DEFINE_MUTEX(eim_lock);
 
 static unsigned int media = 0;
 static int mem = 0;
@@ -97,6 +102,7 @@ static struct dma_chan * dma_m2m_chan;
 static struct completion dma_m2m_ok;
 static unsigned char * eimbuf = NULL;
 static unsigned char * eimrxbuf = NULL;
+static struct dma_slave_config eim_dma_m2m_config;
 // static unsigned char * eimbuf = NULL;
 struct tasklet_struct tasklet_eim_send;			//中断下半部，用来write EIM
 struct tasklet_struct tasklet_eim_rx;			//中断下半部，用来write EIM
@@ -106,6 +112,8 @@ unsigned int eim_send_length;
 unsigned int eim_rx_length;
 
 static int sdma_read_ok = 0;
+
+
 
 module_param (mem, int, 0);
 module_param (irq, int, 0);
@@ -141,7 +149,12 @@ static inline void WRITE_FIFO (void *membase, u16 data)
 #else
 static inline u16 READ_FIFO (void *membase)
 {
-	return readw (membase);
+	 return readw (membase);
+	// return *((u16*)(membase));
+}
+static inline u16 zREAD_FIFO (void *membase)
+{
+	return *(const volatile u16 __force *) (membase);
 }
 
 static inline void WRITE_FIFO (void *membase, u16 data)
@@ -169,6 +182,7 @@ static inline struct ax_device *ax_get_priv (struct net_device *ndev)
 
 static void dma_m2m_tx_callback(void *data);
 static void dma_m2m_rx_callback(void *data);
+static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local);
 static bool dma_m2m_filter(struct dma_chan *chan, void *param)
 {
 	if (!imx_dma_is_general_purpose(chan))
@@ -178,28 +192,7 @@ static bool dma_m2m_filter(struct dma_chan *chan, void *param)
 }
 
 
-static int sdma_open(void)
-{
-	dma_cap_mask_t dma_m2m_mask;
-	struct imx_dma_data m2m_dma_data = {0};
 
-
-	init_completion(&dma_m2m_ok);
-
-
-	dma_cap_zero(dma_m2m_mask);
-	dma_cap_set(DMA_SLAVE, dma_m2m_mask);
-	m2m_dma_data.peripheral_type = IMX_DMATYPE_MEMORY;
-	m2m_dma_data.priority = DMA_PRIO_HIGH;
-
-	dma_m2m_chan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
-	if (!dma_m2m_chan) {
-		printk("Error opening the SDMA memory to memory channel\n");
-		return -EINVAL;
-	}
-
-	return 0;
-}
 
 //在上一个tasklet没有执行完毕时，不会马上重入，但是dma不能马上传输完毕，同时在tasklet里面不能延时，因此需要防止重入
 // static inline void tasklet_eim_rev_handle(unsigned long data)
@@ -281,46 +274,125 @@ static inline void tasklet_eim_send_handle(unsigned long data)
 	// wait_for_completion(&dma_m2m_ok);
 	return ;
 }
-static inline void tasklet_eim_rx_handle(unsigned long data)
+
+static inline void eim_sdma_info_init(void)
 {
+	memset(&eim_dma_m2m_config, 0x00, sizeof(struct dma_slave_config));
+
+	dma_dst = dma_map_single(NULL, eimrxbuf, 2048, DMA_DEV_TO_MEM);
+
+	eim_dma_m2m_config.direction = DMA_DEV_TO_MEM;
+	eim_dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	eim_dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	eim_dma_m2m_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));;
+	eim_dma_m2m_config.dst_addr = dma_dst;
+
+	dmaengine_slave_config(dma_m2m_chan, &eim_dma_m2m_config);
+
+}
+
+static inline void eim_sdma_rx_start(unsigned long data)
+{
+
+
 	struct dma_async_tx_descriptor *dma_m2m_desc;	
-	struct dma_slave_config dma_m2m_config = {0};
-	printk("zty rx handle start!\n");
-	if(eimbuf == NULL || dma_m2m_chan == NULL)
+	unsigned int count = (eim_rx_length +2) & 0x7FC;
+
+	struct net_device *ndev = (struct net_device *)data;
+
+	if(ndev == NULL)
 	{
-		printk("%s %s %d pointer is NULL !\n", __FILE__, __func__, __LINE__);
+		printk("zty callback data error!\n");
+	}
+	//  tasklet_schedule(&tasklet_eim_rx);
+	struct ax_device *ax_local = ax_get_priv (ndev);
+
+	 ax_local->irqlock  = 1;
+
+	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, dma_dst,
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_DEV_TO_MEM);													
+	if (!dma_m2m_desc)
+	{
+		printk("rx prep error!!\n");
 		return ;
 	}
-	// spin_lock(&eim_rw_lock);
-
-	//将内存映射为dma需要的地址信息 写从eimbuf的0x80000开始　前面的内存给读用
-	// dma_src = dma_map_single(NULL, eimbuf, 2048, DMA_MEM_TO_MEM);
-	dma_dst = dma_map_single(NULL, eimrxbuf, 2048, DMA_DEV_TO_MEM);
-	//配置dma
-	// dma_m2m_config.direction = DMA_MEM_TO_MEM;
-	dma_m2m_config.direction = DMA_DEV_TO_MEM;
-	dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
-	dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
-	dma_m2m_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));;
-	dma_m2m_config.dst_addr = dma_dst;
-	dmaengine_slave_config(dma_m2m_chan, &dma_m2m_config);
-
-	printk("zty eim phy addr 0x%x!\n", EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
-	//获取dma描述符
-	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, dma_dst,
-	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  eim_rx_length, DMA_DEV_TO_MEM);													
-	if (!dma_m2m_desc)
-		printk("prep error!!\n");
 	
 	//设置dma传输完成后的回调函数	
 	dma_m2m_desc->callback = dma_m2m_rx_callback;
 	dma_m2m_desc->callback_param = data;
-	printk("zty eim submit start 0x%lx!\n", jiffies);
+	// printk("zty eim submit start 0x%lx!\n", jiffies);
 	dmaengine_submit(dma_m2m_desc);
 	dma_async_issue_pending(dma_m2m_chan);	
-	// spin_unlock(&eim_rw_lock);
+}
 
-	// wait_for_completion(&dma_m2m_ok);
+static int sdma_open(void)
+{
+	dma_cap_mask_t dma_m2m_mask;
+	struct imx_dma_data m2m_dma_data = {0};
+
+
+	init_completion(&dma_m2m_ok);
+
+
+	dma_cap_zero(dma_m2m_mask);
+	dma_cap_set(DMA_SLAVE, dma_m2m_mask);
+	m2m_dma_data.peripheral_type = IMX_DMATYPE_MEMORY;
+	m2m_dma_data.priority = DMA_PRIO_HIGH;
+
+	dma_m2m_chan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
+	if (!dma_m2m_chan) {
+		printk("Error opening the SDMA memory to memory channel\n");
+		return -EINVAL;
+	}
+
+	eim_sdma_info_init();
+
+	return 0;
+}
+
+
+static inline void tasklet_eim_rx_handle(unsigned long data)
+{
+	// struct dma_async_tx_descriptor *dma_m2m_desc;	
+	// struct dma_slave_config dma_m2m_config = {0};
+	// printk("zty rx handle start!\n");
+	// if(eimbuf == NULL || dma_m2m_chan == NULL)
+	// {
+	// 	printk("%s %s %d pointer is NULL !\n", __FILE__, __func__, __LINE__);
+	// 	return ;
+	// }
+	// // spin_lock(&eim_rw_lock);
+
+	// //将内存映射为dma需要的地址信息 写从eimbuf的0x80000开始　前面的内存给读用
+	// // dma_src = dma_map_single(NULL, eimbuf, 2048, DMA_MEM_TO_MEM);
+	// dma_dst = dma_map_single(NULL, eimrxbuf, 2048, DMA_DEV_TO_MEM);
+	// //配置dma
+	// // dma_m2m_config.direction = DMA_MEM_TO_MEM;
+	// dma_m2m_config.direction = DMA_DEV_TO_MEM;
+	// dma_m2m_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	// dma_m2m_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	// dma_m2m_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));;
+	// dma_m2m_config.dst_addr = dma_dst;
+	// dmaengine_slave_config(dma_m2m_chan, &dma_m2m_config);
+
+	// printk("zty eim phy addr 0x%x!\n", EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+	// //获取dma描述符
+	// dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, dma_dst,
+	// (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  eim_rx_length, DMA_DEV_TO_MEM);													
+	// if (!dma_m2m_desc)
+	// 	printk("prep error!!\n");
+	
+	// //设置dma传输完成后的回调函数	
+	// dma_m2m_desc->callback = dma_m2m_rx_callback;
+	// dma_m2m_desc->callback_param = data;
+	// printk("zty eim submit start 0x%lx!\n", jiffies);
+	// dmaengine_submit(dma_m2m_desc);
+	// dma_async_issue_pending(dma_m2m_chan);	
+	// // spin_unlock(&eim_rw_lock);
+
+	printk("zty wait start!\n");
+	 wait_for_completion(&dma_m2m_ok);
+	 printk("zty wait completion!\n");
 	return ;
 }
 
@@ -337,6 +409,7 @@ static int eim_sdma_init(void * para)
 	memset(eimrxbuf, 0x00, 2048);
 	tasklet_init(&tasklet_eim_send, tasklet_eim_send_handle, (unsigned int)para);	
 	tasklet_init(&tasklet_eim_rx, tasklet_eim_rx_handle, (unsigned int)para);
+	// eim_sdma_info_init();
 }
 
 
@@ -401,23 +474,65 @@ static void dma_m2m_rx_callback(void *data)
 {
 	int i = 0;
 	struct net_device *ndev = (struct net_device *)data;
+
 	if(ndev == NULL)
 	{
 		printk("zty callback data error!\n");
 	}
-	printk("zty dma rx end %d jj 0x%lx!\n", eim_rx_length, jiffies);
-	for(i = 0; i < eim_rx_length;i++)
+
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	int pkt_len = eim_rx_length;
+	// printk("zty dma rx end %d jj 0x%lx!\n", eim_rx_length, jiffies);
+	// for(i = 0; i < eim_rx_length;i++)
+	// {
+	// 	printk("0x%x ", eimrxbuf[i]);
+	// }
+	// printk("\n");
+	// complete(&dma_m2m_ok);
+
+	struct sk_buff *skb;
+	int status;
+			skb = dev_alloc_skb (pkt_len + 2);
+			if (skb == NULL) {
+				PRINTK (ERROR_MSG, PFX
+					" Couldn't allocate a sk_buff"
+					" of size %d.\n", pkt_len);
+				ax_local->stat.rx_dropped++;
+				return;
+			}
+
+			/* IP headers on 16 byte boundaries */
+			skb_reserve (skb, 2);
+			skb->dev = ndev;
+			skb_put (skb, pkt_len);
+	memcpy(skb->data, eimrxbuf, eim_rx_length);	
+	// dma_unmap_single(NULL, dma_dst, 2048, DMA_DEV_TO_MEM);
+	skb->protocol = eth_type_trans (skb,ndev);
+
+	status = netif_rx (skb);
+	if (status != NET_RX_SUCCESS)
+		PRINTK (ERROR_MSG,
+			"netif_rx status %d\n", status);
+
+
+ 	
+     void *ax_base = ax_local->membase;
+    // if(ax88796b_sdma_rx_poll(ndev, ax_local) == 0)
 	{
-		printk("0x%x ", eimrxbuf[i]);
+		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+		ax_local->irqlock 	 = 0;
+		sdma_read_ok = 0;
 	}
-	printk("\n");
-	complete(&dma_m2m_ok);
-	dma_unmap_single(NULL, dma_dst, 2048, DMA_DEV_TO_MEM);
+	// complete(&dma_m2m_ok);
 
- 	struct ax_device *ax_local = ax_get_priv (ndev);
-    void *ax_base = ax_local->membase;
+	// mutex_unlock(&eim_lock);
 
-	sdma_read_ok = 1;
+	// if (napi_schedule_prep(&ax_local->napi)) {
+	// 	// printk("zty napi start!\n");
+	// 	__napi_schedule(&ax_local->napi);
+	// }
+	// sdma_read_ok = 0;
+	printk("zty rev end!\n");
 		
 	return ;
 }
@@ -472,10 +587,10 @@ int sdma_eim_read( unsigned int size)
 
 	// struct dma_async_tx_descriptor *dma_m2m_desc;
 	// struct dma_slave_config dma_m2m_config = {0};	
-	int i = 0;
+	// int i = 0;
 
 	eim_rx_length = size;
-	printk("zty rx size %d!\n",size);
+	// printk("zty rx size %d!\n",size);
 	
 	// tasklet_schedule(&tasklet_eim_rx);	
 
@@ -955,22 +1070,22 @@ static int ax88796b_send_data (struct net_device *ndev)
 		return NETDEV_TX_BUSY;
 	}
 
-	ax_block_dma_output(ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	// ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	// ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-	// if (free_pages == need_pages) {
-	// 	netif_stop_queue (ndev);
-	// 	ax_local->tx_full = 1;
-	// }
-	// ax_local->tx_prev_ctepr = ctepr;
-	// ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-	// 	ax_local->tx_stop_page) ? 
-	// 	(ax_local->tx_curr_page + need_pages) : 
-	// 	(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-	// 	 + ax_local->tx_start_page);
+	// ax_block_dma_output(ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+	if (free_pages == need_pages) {
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+	}
+	ax_local->tx_prev_ctepr = ctepr;
+	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+		ax_local->tx_stop_page) ? 
+		(ax_local->tx_curr_page + need_pages) : 
+		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+		 + ax_local->tx_start_page);
 
-	// ax_local->irqlock = 0;	
-	// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+	ax_local->irqlock = 0;	
+	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 
 	spin_unlock_irqrestore (&ax_local->page_lock, flags);
 
@@ -1163,41 +1278,43 @@ static int otp_wait_busy(u32 flags, void* otp_base, struct clk *otp_clk)
  * Purpose: Load MAC address from EEPROM
  * ----------------------------------------------------------------------------
  */
+ 
+ssize_t ds2460_read_generic(u8 *buf, loff_t addr, unsigned len);
 static void ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
 {
-	struct device_node *np = NULL;
-	struct clk *otp_clk;
-	void __iomem *otp_base;
-	struct resource res;
-	int ret;
-	u32 value = 0;
+	// struct device_node *np = NULL;
+	// struct clk *otp_clk;
+	// void __iomem *otp_base;
+	// struct resource res;
+	// int ret;
+	// u32 value = 0;
 
-	np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-ocotp");
-	ret=of_address_to_resource(np, 0, &res);
-	otp_base=ioremap(res.start,0x4000);
-	otp_clk = of_clk_get(np, 0);
-	if (IS_ERR(otp_clk)) {
-		printk( "wwwwwww of_clk_get_by_name xxxxxxx\n");
-	}
+	// np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-ocotp");
+	// ret=of_address_to_resource(np, 0, &res);
+	// otp_base=ioremap(res.start,0x4000);
+	// otp_clk = of_clk_get(np, 0);
+	// if (IS_ERR(otp_clk)) {
+	// 	printk( "wwwwwww of_clk_get_by_name xxxxxxx\n");
+	// }
 
-	ret = clk_prepare_enable(otp_clk);
-	if (ret)
-		printk("clk_prepare_enable xxxxxxxx\n");
+	// ret = clk_prepare_enable(otp_clk);
+	// if (ret)
+	// 	printk("clk_prepare_enable xxxxxxxx\n");
 
-	set_otp_timing(otp_base, otp_clk);
-	ret = otp_wait_busy(0, otp_base, otp_clk);
-	if (ret)
-		printk("otp_wait_busy xxxxxxxx\n");
+	// set_otp_timing(otp_base, otp_clk);
+	// ret = otp_wait_busy(0, otp_base, otp_clk);
+	// if (ret)
+	// 	printk("otp_wait_busy xxxxxxxx\n");
 
-	value = __raw_readl(otp_base + HW_OCOTP_CUST_N(34));
-	pMac[2]=value>>24;
-	pMac[3]=value>>16;
-	pMac[4]=value>>8;
-	pMac[5]=value;
-	value = __raw_readl(otp_base + HW_OCOTP_CUST_N(35));
-	pMac[0]=value>>8;
-	pMac[1]=value;
-	clk_disable_unprepare(otp_clk);
+	// value = __raw_readl(otp_base + HW_OCOTP_CUST_N(34));
+	// pMac[2]=value>>24;
+	// pMac[3]=value>>16;
+	// pMac[4]=value>>8;
+	// pMac[5]=value;
+	// value = __raw_readl(otp_base + HW_OCOTP_CUST_N(35));
+	// pMac[0]=value>>8;
+	// pMac[1]=value;
+	// clk_disable_unprepare(otp_clk);
 
 #if 0
 	struct ax_device *ax_local = ax_get_priv (ndev);
@@ -1236,8 +1353,8 @@ static void ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
 		PRINTK (DRIVER_MSG, "Use random MAC address\n");
 		random_ether_addr(pMac);
 	}
-//#else
-	ds2460_read_generic(pMac, 0x90, 6);
+#else
+	 ds2460_read_generic(pMac, 0x90, 6);
 	if (!is_valid_ether_addr (pMac)) {
 		PRINTK (DRIVER_MSG, "MAC read from ds2460 is invalid, so use random MAC address\n");
 		random_ether_addr(pMac);
@@ -1415,11 +1532,23 @@ static void do_set_multicast_list (struct net_device *ndev)
 	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
 
   	if (ndev->flags&IFF_PROMISC)
-		writeb (E8390_RXCONFIG | 0x18, ax_base + ADDR_SHIFT16(EN0_RXCR));
-	else if (ndev->flags & IFF_ALLMULTI || mc_count) 
-		writeb (E8390_RXCONFIG | 0x08, ax_base + ADDR_SHIFT16(EN0_RXCR));
-	else 
+	{
+		// writeb (E8390_RXCONFIG | 0x18, ax_base + ADDR_SHIFT16(EN0_RXCR));
+		writeb (E8390_RXCONFIG , ax_base + ADDR_SHIFT16(EN0_RXCR));
+		printk("zty promisc mode!\n");
+	}
+	else if (ndev->flags & IFF_ALLMULTI || mc_count)
+	{
+		printk("zty multi mode!\n");
+		// writeb (E8390_RXCONFIG | 0x08, ax_base + ADDR_SHIFT16(EN0_RXCR));
 		writeb (E8390_RXCONFIG, ax_base + ADDR_SHIFT16(EN0_RXCR));
+	}
+	else 
+	{
+		printk("zty broadcast mode!\n");
+		writeb (E8390_RXCONFIG, ax_base + ADDR_SHIFT16(EN0_RXCR));
+	}
+	// writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RXCR));
  }
 
 
@@ -1796,8 +1925,8 @@ ax88796b_get_hdr (struct net_device *ndev,
 
 	while (( readb (ax_base + ADDR_SHIFT16(EN0_SR)) & ENSR_DMA_READY) == 0);
 
-	*buf = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-	*(++buf) = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+	*buf = zREAD_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+	*(++buf) = zREAD_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
 
 	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
 	ax_local->dmaing = 0;
@@ -1856,30 +1985,30 @@ ax88796b_block_input (struct net_device *ndev, int count,
 	}
 #else
 	{
-		if(debugPrint == 0)
-		{
-			sdma_eim_read(count +2);
-			tasklet_eim_rx_handle(ndev);
-			printk("zty tasklet_eim_rx_handle end!\n");
-			debugPrint = 1;
-			//while (sdma_read_ok == 0);
+		// if(debugPrint == 0)
+		// {
+		// 	sdma_eim_read(count +2);
+		// 	tasklet_eim_rx_handle(ndev);
+		// 	printk("zty tasklet_eim_rx_handle end!\n");
+		// 	debugPrint = 1;
+		// 	//while (sdma_read_ok == 0);
 
-		}
-		else
+		// }
+		// else
 		{
-			if(debugPrint < 6)
-			{
-				printk("read %d start 0x%lx!\n", count, jiffies);
-			}
+			// if(debugPrint < 6)
+			// {
+			// 	printk("read %d start 0x%lx!\n", count, jiffies);
+			// }
 			for (i = 0; i < count; i += 2) {
-				*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-				//*buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
+				 *buf++ = zREAD_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+				// *buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
 			}
-			if(debugPrint < 6)
-			{
-				printk("read end 0x%lx!\n", jiffies);
-				debugPrint++;
-			}
+			// if(debugPrint < 6)
+			// {
+			// 	printk("read end 0x%lx!\n", jiffies);
+			// 	debugPrint++;
+			// }
 		}
 	}
 #endif
@@ -2056,7 +2185,15 @@ static int ax88796b_start_xmit (struct sk_buff *skb, struct net_device *ndev)
 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
 
 	send_length = skb->len;
-
+	// dump_stack();
+	// mutex_lock(&eim_lock);
+	printk("zty send start!\n");
+	if(sdma_read_ok == 1)
+	{
+		printk("zty eim is rx!\n");
+		dump_stack();
+		return NETDEV_TX_BUSY;
+	}
 	spin_lock_irqsave (&ax_local->page_lock, flags);
 
 	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
@@ -2104,6 +2241,7 @@ static int ax88796b_start_xmit (struct sk_buff *skb, struct net_device *ndev)
 
 	if (free_pages < need_pages) {
 		PRINTK (DEBUG_MSG, "free_pages < need_pages\n");
+		printk("zty ax88796 start send!\n");
 		netif_stop_queue (ndev);
 		ax_local->tx_full = 1;
 		ax_local->irqlock = 0;	
@@ -2137,15 +2275,17 @@ static int ax88796b_start_xmit (struct sk_buff *skb, struct net_device *ndev)
 		 + ax_local->tx_start_page);
 
 	ax_local->irqlock = 0;	
+	// printk("zty ax88796 start send ii!\n");
 	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 
 	spin_unlock_irqrestore (&ax_local->page_lock, flags);
+	// mutex_unlock(&eim_lock);
 
 	dev_kfree_skb (skb);
 
 	ndev->trans_start = jiffies;
 	ax_local->stat.tx_bytes += send_length;
-
+	printk("zty send end!\n");
 	PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
 
 	return NETDEV_TX_OK;
@@ -2349,7 +2489,7 @@ static int ax88796b_poll(struct napi_struct *napi, int budget)
 		cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
 		writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
 		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-		 __napi_complete(napi);
+		  __napi_complete(napi);
 
 	}
 
@@ -2450,6 +2590,196 @@ static irqreturn_t ax_interrupt (int irq, void *dev_id, struct pt_regs * regs)
 	return IRQ_RETVAL (1);
 }
 
+static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local)
+{
+	void *ax_base = ax_local->membase;
+	unsigned char rxing_page, this_frame, next_frame;
+	unsigned short current_offset;
+	struct ax_pkt_hdr rx_frame;
+	int ret = 0;
+	// int pkt_cnt = 0;
+	// int i;
+
+	//PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
+
+	if(netif_running(ndev)) 
+	{
+
+		int pkt_len, pkt_stat;
+
+		/* Get the rx page (incoming packet pointer). */
+		rxing_page = readb (ax_base + ADDR_SHIFT16(EN0_CURPAG));
+
+		/* 
+		 * Remove one frame from the ring.
+		 * Boundary is always a page behind.
+		 */
+		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
+		if (this_frame >= ax_local->stop_page)
+			this_frame = ax_local->rx_start_page;
+		
+		if (this_frame == rxing_page) {	/* Read all the frames? */
+			return 0;			/* Done for now */
+		}
+		current_offset = this_frame << 8;
+		ax88796b_get_hdr (ndev, &rx_frame, this_frame);
+
+
+		pkt_len = rx_frame.count - sizeof (struct ax_pkt_hdr);
+		pkt_stat = rx_frame.status;
+		next_frame = this_frame + 1 + ((pkt_len + 4) >> 8);
+
+		if (pkt_len < 60  ||  pkt_len > 1518) {
+			PRINTK (ERROR_MSG, PFX
+				" bogus pkt size: %d, status=%#2x nxpg=%#2x.\n",
+				rx_frame.count, rx_frame.status, rx_frame.next);
+			ax_local->stat.rx_errors++;
+			ax_local->stat.rx_length_errors++;
+		} else if ((pkt_stat & 0x0F) == ENRSR_RXOK) {
+			sdma_eim_read(pkt_len);
+			// tasklet_eim_rx_handle(ndev);
+			eim_sdma_rx_start(ndev);
+			ret = 1;
+			
+		} else {
+			PRINTK (ERROR_MSG, PFX
+				" bogus packet: status=%#2x"
+				" nxpg=%#2x size=%d\n",
+				rx_frame.status, rx_frame.next, rx_frame.count);
+			ax_local->stat.rx_errors++;
+			/* NB: The NIC counts CRC, frame and missed errors. */
+			if (pkt_stat & ENRSR_FO)
+				ax_local->stat.rx_fifo_errors++;
+		}
+		next_frame = rx_frame.next;
+
+		ax_local->current_page = next_frame;
+		writeb (next_frame-1, ax_base + ADDR_SHIFT16(EN0_BOUNDARY));
+
+	}
+
+	return ret;
+}
+
+static int ax88796b_sdma_poll(struct napi_struct *napi, int budget)
+{
+	struct ax_device *ax_local = container_of(napi, struct ax_device, napi);
+	struct net_device *dev = ax_local->ndev;
+	void *ax_base = ax_local->membase;
+	int work_done;
+	u8 cmd;
+	unsigned long flags;
+
+	//PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
+
+	spin_lock_irqsave(&ax_local->page_lock, flags);
+
+	// work_done = ax88796b_rx_poll(dev, ax_local, budget);
+
+	
+
+
+		cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
+		writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
+		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+		 __napi_complete(napi);
+
+	
+
+	
+	spin_unlock_irqrestore(&ax_local->page_lock, flags);
+
+	return work_done;
+}
+
+static irqreturn_t ax_sdma_interrupt (int irq, void *dev_id)
+{
+	struct net_device *ndev = dev_id;
+	int interrupts;
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+	u8 CurrImr;
+
+	if (ndev == NULL) 
+	{
+		PRINTK (ERROR_MSG,
+			"net_interrupt(): irq %d for unknown device.\n", irq);
+		return IRQ_RETVAL (0);
+	}
+
+	spin_lock (&ax_local->page_lock);
+
+	writeb (E8390_NODMA | E8390_PAGE3, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+	CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
+
+	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+
+	if (ax_local->irqlock) {
+		printk ("Interrupt occurred when irqlock locked\n");
+		spin_unlock (&ax_local->page_lock);
+		return IRQ_RETVAL (0);
+	}
+
+	do {
+		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) == 0)
+			break;
+		printk("zty 88796 interupt 0x%x!\n", interrupts);
+		writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
+
+		if (interrupts & ENISR_TX) {
+			ax_tx_intr (ndev);
+		}
+
+		if (interrupts & (ENISR_RX | ENISR_RX_ERR | ENISR_OVER)) {
+			//PRINTK (INT_MSG, PFX " RX int\n");
+
+			// if (napi_schedule_prep(&ax_local->napi)) {
+			// 	CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
+			// 	__napi_schedule(&ax_local->napi);
+			// }
+			// mutex_lock(&eim_lock);
+			printk("zty receive start!\n");
+			if(sdma_read_ok == 0)
+			{
+				sdma_read_ok = 1;
+			 	ax88796b_sdma_rx_poll(ndev, ax_local);
+			}
+			else
+				printk("zty rx error!\n");
+			CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
+		}
+
+		if (interrupts & ENISR_TX_ERR) {
+			PRINTK (INT_MSG, PFX " TX err int\n");
+			ax_tx_err (ndev);
+		}
+
+		if (interrupts & ENISR_COUNTERS) {   
+			ax_local->stat.rx_frame_errors += 
+					readb (ax_base + ADDR_SHIFT16(EN0_COUNTER0));
+			ax_local->stat.rx_crc_errors += 
+					readb (ax_base + ADDR_SHIFT16(EN0_COUNTER1));
+			ax_local->stat.rx_missed_errors += 
+					readb (ax_base + ADDR_SHIFT16(EN0_COUNTER2));
+			writeb (ENISR_COUNTERS, ax_base + ADDR_SHIFT16(EN0_ISR));
+		}
+
+		if (interrupts & ENISR_RDC)
+			writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
+	} while (0);
+	// printk("zty currimr is 0x%x!\n", CurrImr);
+	writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
+	
+
+	spin_unlock (&ax_local->page_lock);
+
+	//PRINTK (INT_MSG, PFX " %s end ..........\n", __FUNCTION__);
+
+	return IRQ_RETVAL (1);
+}
+
 /*
  * ----------------------------------------------------------------------------
  * Function Name: ax88796b_open
@@ -2464,7 +2794,12 @@ static int ax88796b_open (struct net_device *ndev)
 
 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
 
-	ret = request_irq (ndev->irq,&ax_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
+#ifndef AX88796_SDMA_MODE
+	 ret = request_irq (ndev->irq,&ax_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
+#else
+	ret = request_irq (ndev->irq,&ax_sdma_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
+#endif
+	
 
 	if (ret) {
 		PRINTK (ERROR_MSG, PFX
@@ -2640,7 +2975,12 @@ static int ax_probe (struct net_device *ndev, struct ax_device *ax_local)
 	ax_local->media = media;
 
 	if (weight == 0) {
+#ifndef AX88796_SDMA_MODE
 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, 4);
+#else
+		netif_napi_add(ndev, &ax_local->napi, ax88796b_sdma_poll, 4);
+#endif
+		
 		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT (default) = %d\n", 4);
 	}
 	else {
@@ -2882,8 +3222,10 @@ static int ax88796b_drv_probe(struct platform_device *pdev)
 	ax_local->membase = addr;
  	ax_local->ndev = ndev;
 
+#ifdef AX88796_SDMA_MODE
 	eim_sdma_init(ndev);
 	sdma_open();
+#endif 
 
 	//printk("zty ax_probe before!\n");
 	ret = ax_probe (ndev, ax_local);
