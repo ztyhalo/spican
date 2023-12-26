@@ -227,6 +227,12 @@ static inline void WRITE_FIFO (void *membase, u16 data)
 {
 	writew (data, membase);
 }
+static inline void zWRITE_FIFO (void *membase, u16 data)
+{
+// *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
+	*(volatile u16 __force *)(membase) = data;
+}
+
 #endif
 
 static inline struct ax_device *ax_get_priv (struct net_device *ndev)
@@ -2350,10 +2356,11 @@ ax88796b_block_input (struct net_device *ndev, int count,
 			// {
 			// 	printk("read %d start 0x%lx!\n", count, jiffies);
 			// }
-			for (i = 0; i < count; i += 2) {
-				 *buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
+			for (i = 0; i < count -2; i += 2) {
+				 *buf++ = zREAD_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
 				// *buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
 			}
+			*buf = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
 			// if(debugPrint < 6)
 			// {
 			// 	printk("read end 0x%lx!\n", jiffies);
@@ -2437,10 +2444,12 @@ ax_block_output (struct net_device *ndev, int count,
 #else
 	{
 		u16 i;
-		for (i = 0; i < count; i += 2) {
-			WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
-			// *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
+		for (i = 0; i < count -2; i += 2) {
+			// WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
+			//  *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
+			 zWRITE_FIFO(ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
 		}
+		WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
 	}
 #endif
 
