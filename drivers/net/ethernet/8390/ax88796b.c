@@ -1858,18 +1858,18 @@ static void do_set_multicast_list (struct net_device *ndev)
 	{
 		writeb (E8390_RXCONFIG | 0x18, ax_base + ADDR_SHIFT16(EN0_RXCR));
 		// writeb (E8390_RXCONFIG , ax_base + ADDR_SHIFT16(EN0_RXCR));
-		printk("zty promisc mode!\n");
+		// printk("zty promisc mode!\n");
 	}
 	else if (ndev->flags & IFF_ALLMULTI || mc_count)
 	{
 		// dump_stack();
-		printk("zty multi mode!\n");
+		// printk("zty multi mode!\n");
 		writeb (E8390_RXCONFIG | 0x08, ax_base + ADDR_SHIFT16(EN0_RXCR));
 		// writeb (0x04, ax_base + ADDR_SHIFT16(EN0_RXCR));
 	}
 	else 
 	{
-		printk("zty broadcast mode!\n");
+		// printk("zty broadcast mode!\n");
 		writeb (E8390_RXCONFIG, ax_base + ADDR_SHIFT16(EN0_RXCR));
 	}
 	//  writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RXCR));
@@ -2974,7 +2974,7 @@ static int ax88796b_open (struct net_device *ndev)
  * Purpose: 
  * ----------------------------------------------------------------------------
  */
-int gsleep_mark = 0;
+// int gsleep_mark = 0;
 static int ax88796b_close (struct net_device *ndev)
 {
 	struct ax_device *ax_local = ax_get_priv (ndev);
@@ -2985,23 +2985,23 @@ static int ax88796b_close (struct net_device *ndev)
 	napi_disable(&ax_local->napi);
 	del_timer_sync (&ax_local->watchdog);
 	disable_irq (ndev->irq);
-	printk("zty ax88796 del_timer_sync !\n");
+	// printk("zty ax88796 del_timer_sync !\n");
 	spin_lock_irqsave (&ax_local->page_lock, flags);
-	printk("zty ax88796 init !\n");
+	// printk("zty ax88796 init !\n");
 	ax88796b_init (ndev, 0);
-	printk("zty ax88796 init end!\n");
+	// printk("zty ax88796 init end!\n");
 	// disable_irq (ndev->irq);
-	printk("zty disable irq!\n");
+	// printk("zty disable irq!\n");
 	free_irq (ndev->irq, ndev);
 	
-	printk("zty ax88796 free_irq !\n");
-	gsleep_mark = 1;
+	// printk("zty ax88796 free_irq !\n");
+	// gsleep_mark = 1;
 	// clear_bit(NAPI_STATE_SCHED, &ax_local->napi.state);
 	// 	printk("hndz naip error!\n");
 	// napi_disable(&ax_local->napi);
-printk("zty ax88796 napi_disable !\n");
+	// printk("zty ax88796 napi_disable !\n");
    	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	printk("zty ax88796 spin_unlock_irqrestore !\n");
+	// printk("zty ax88796 spin_unlock_irqrestore !\n");
 	netif_stop_queue (ndev);
 
 	PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);

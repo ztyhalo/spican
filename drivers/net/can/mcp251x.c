@@ -1055,7 +1055,7 @@ static int mcp251x_can_probe(struct spi_device *spi)
 	int freq, ret;
 	struct device *dev = &spi->dev;
 //	int rst_gpio = 0;
-	if (ktc256sign!=0xFF) return 0;
+	// if (ktc256sign!=0xFF) return 0;
 	//printk("zty mcp251x probe start!\n");
 
 	clk = devm_clk_get(&spi->dev, NULL);
