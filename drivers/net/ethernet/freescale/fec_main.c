@@ -1383,7 +1383,7 @@ static bool fec_enet_copybreak(struct net_device *ndev, struct sk_buff **skb,
 static int
 fec_enet_rx_queue(struct net_device *ndev, int budget, u16 queue_id)
 {
-	int i;
+	// int i;
 	struct fec_enet_private *fep = netdev_priv(ndev);
 	struct fec_enet_priv_rx_q *rxq;
 	struct bufdesc *bdp;
@@ -1804,7 +1804,7 @@ static int fec_enet_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
 {
 	struct fec_enet_private *fep = bus->priv;
 	unsigned long time_left;
-	int ret = 0, frame_start, frame_addr,frame_op;
+	int frame_start, frame_addr,frame_op;
 	bool is_c45 = !!(regnum & MII_ADDR_C45);
 
 	fep->mii_timeout = 0;
@@ -1859,7 +1859,7 @@ static int fec_enet_mdio_write(struct mii_bus *bus, int mii_id, int regnum,
 {
 	struct fec_enet_private *fep = bus->priv;
 	unsigned long time_left;
-	int ret, frame_start, frame_addr;
+	int frame_start, frame_addr;
 	bool is_c45 = !!(regnum & MII_ADDR_C45);
 
 	fep->mii_timeout = 0;

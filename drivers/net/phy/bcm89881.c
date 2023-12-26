@@ -155,19 +155,21 @@ static int bcm89881_config_init(struct phy_device *phydev)
 {
 	/* Temporarily just say we support everything */
 	int val;
+	int tc10_ctrl, tc10_disable, superisolate;
 	u32 features = 0;
 //	printk("zty gen10g config init!\n");
 //	gen10g_get_features(phydev);
 //	phydev->supported = SUPPORTED_10000baseT_Full;
-	phydev->advertising = SUPPORTED_10000baseT_Full;
+	
 	int speed = 1000;
 	int polarity_ena_100 = 1;
-	int tc10_ctrl, tc10_disable, superisolate;
+	
 	int autoneg = 0;
 	int workmode= 0;
 	int testoff_100m = 0;
 	int AutoNegForce_MS = 0; //能设置
 
+	phydev->advertising = SUPPORTED_10000baseT_Full;
 	phydev->link = 0;
 	features = (SUPPORTED_TP | SUPPORTED_MII
 			| SUPPORTED_AUI | SUPPORTED_FIBRE |
@@ -747,7 +749,7 @@ static int bcm89881_read_status(struct phy_device *phydev)
 //	int devad, reg;
 	int val;
 	int adv;
-	int err;
+	// int err;
 	int lpa;
 	int lpagb = 0;
 	int common_adv;

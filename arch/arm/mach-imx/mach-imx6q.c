@@ -58,7 +58,7 @@ static int flexcan1_en;
 #define WDT_PIN_MUX     MX6QDL_PAD_SD3_RST__GPIO7_IO08
 struct timer_list wdt_timer;
 static int Pin_State= 0;
-void feed_wdt(void)
+void feed_wdt(unsigned long val)
 {
 	Pin_State = !Pin_State;
 	gpio_set_value(FEED_WDT_PIN, Pin_State);
@@ -78,7 +78,7 @@ static void __init wdt_init(void)
 	init_timer(&wdt_timer);
 	wdt_timer.expires = jiffies;
 	wdt_timer.function = feed_wdt;
-	wdt_timer.data = NULL;
+	wdt_timer.data = 0;
 	add_timer(&wdt_timer);
 	return;
 }
@@ -222,7 +222,7 @@ static int ksz9031rn_phy_reset(void)
 
 static int ksz9031rn_phy_fixup(struct phy_device *dev)
 {
-	u16 val;
+	// u16 val;
 
 //	printk("zty ksz init!\n");
 //	dump_stack();
@@ -239,51 +239,51 @@ static int ksz9031rn_phy_fixup(struct phy_device *dev)
 	return 0;
 }
 
-static int bcm881rn_phy_reset(void)
-{
-	#define zPHY_RESET_PIN	IMX_GPIO_NR(3, 20)
-	gpio_request(zPHY_RESET_PIN, "phy reset");
-	gpio_direction_output(zPHY_RESET_PIN, 0);
-	msleep(50);
-	gpio_set_value(zPHY_RESET_PIN, 1);
+// static int bcm881rn_phy_reset(void)
+// {
+// 	#define zPHY_RESET_PIN	IMX_GPIO_NR(3, 20)
+// 	gpio_request(zPHY_RESET_PIN, "phy reset");
+// 	gpio_direction_output(zPHY_RESET_PIN, 0);
+// 	msleep(50);
+// 	gpio_set_value(zPHY_RESET_PIN, 1);
 
-	return 0;
-}
+// 	return 0;
+// }
 
 
-static int bcm881rn_phy_fixup(struct phy_device *dev)
-{
-	u16 val;
-	int tc10_ctrl;
+// static int bcm881rn_phy_fixup(struct phy_device *dev)
+// {
+// 	// u16 val;
+// 	// int tc10_ctrl;
 
-	// printk("zty bcm881 init!\n");
-	// dump_stack();
+// 	// printk("zty bcm881 init!\n");
+// 	// dump_stack();
 
-	bcm881rn_phy_reset();
-	msleep(50);
-	/*
-	 * min rx data delay, max rx/tx clock delay,
-	 * min rx/tx control delay
-	 */
-	zty_c45_write(dev, 0x01, 0, 0x8040); /*reset*/
-	msleep(50);
+// 	bcm881rn_phy_reset();
+// 	msleep(50);
+// 	/*
+// 	 * min rx data delay, max rx/tx clock delay,
+// 	 * min rx/tx control delay
+// 	 */
+// 	zty_c45_write(dev, 0x01, 0, 0x8040); /*reset*/
+// 	msleep(50);
 
-//	tc10_ctrl = zty_c45_read(dev, 1, 0);
-//	printk("zty reset control 0x%x!\n", tc10_ctrl);
-//	mdiobus_c45_read(dev->bus, dev->addr, 0x1E, 0x00F0);
-//	tc10_ctrl = zty_c45_read(dev, 0x1E, 0x00F0);
+// //	tc10_ctrl = zty_c45_read(dev, 1, 0);
+// //	printk("zty reset control 0x%x!\n", tc10_ctrl);
+// //	mdiobus_c45_read(dev->bus, dev->addr, 0x1E, 0x00F0);
+// //	tc10_ctrl = zty_c45_read(dev, 0x1E, 0x00F0);
 
-//	printk("zty tc ctrl 0x%x!\n", tc10_ctrl);
+// //	printk("zty tc ctrl 0x%x!\n", tc10_ctrl);
 
-//	tc10_ctrl = zty_c45_read(dev, 0x07, 0x0201);
+// //	tc10_ctrl = zty_c45_read(dev, 0x07, 0x0201);
 
-//	printk("zty tc 0x0201 0x%x!\n", tc10_ctrl);
-//	mmd_write_reg(dev, 2, 4, 0);
-//	mmd_write_reg(dev, 2, 5, 0);
-//	mmd_write_reg(dev, 2, 8, 0x003ff);
+// //	printk("zty tc 0x0201 0x%x!\n", tc10_ctrl);
+// //	mmd_write_reg(dev, 2, 4, 0);
+// //	mmd_write_reg(dev, 2, 5, 0);
+// //	mmd_write_reg(dev, 2, 8, 0x003ff);
 
-	return 0;
-}
+// 	return 0;
+// }
 
 /*
  * fixup for PLX PEX8909 bridge to configure GPIO1-7 as output High

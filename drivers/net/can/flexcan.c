@@ -783,7 +783,7 @@ static int flexcan_read_frame(struct net_device *dev)
 
 	return 1;
 }
-
+#ifndef IRQ_CAN_RX
 static int flexcan_poll(struct napi_struct *napi, int quota)
 {
 	struct net_device *dev = napi->dev;
@@ -822,6 +822,8 @@ static int flexcan_poll(struct napi_struct *napi, int quota)
 
 	return work_done;
 }
+#endif 
+
 static inline struct flexcan_priv *rx_offload_to_priv(struct can_rx_offload *offload)
 {
 	return container_of(offload, struct flexcan_priv, offload);
@@ -935,7 +937,7 @@ int can_rx_offload_irq_offload_fifo(struct can_rx_offload *offload)
 
 	return received;
 }
-
+#ifndef IRQ_CAN_RX
 static irqreturn_t flexcan_irq(int irq, void *dev_id)
 {
 	struct net_device *dev = dev_id;
@@ -992,6 +994,7 @@ static irqreturn_t flexcan_irq(int irq, void *dev_id)
 
 	return IRQ_HANDLED;
 }
+#endif
 
 static irqreturn_t flexcan_napi_irq(int irq, void *dev_id)
 {

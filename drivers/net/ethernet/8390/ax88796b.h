@@ -65,6 +65,12 @@ enum watchdog_state {
 /* Most of these entries should be in 'struct net_device' (or most of the
    things in there should be here!) */
 /* You have one of these per-board */
+
+struct boardcast_info {
+	u32  bcast_mark;
+	u32  bcast_max;
+	u32  bcast_time;
+};
 struct ax_device {
 	void			*membase;
 	struct net_device	*ndev;
@@ -90,6 +96,9 @@ struct ax_device {
 	struct napi_struct 	napi;
 	u8			intr;
 	struct sk_buff 		*tx_queue;
+	u32         boardcast_num;
+	u32         time_num;
+	u32         storm_mark;
 #	define WAKEUP_MP	0x01
 #	define WAKEUP_LSCWE	0x02
 };
@@ -100,7 +109,7 @@ struct ax_device {
 
 /* Some generic ethernet register configurations. */
 
-#define E8390_RXCONFIG		0x0	/* EN0_RXCR: broadcasts, no multicast,errors */
+#define E8390_RXCONFIG		0x4	/* EN0_RXCR: broadcasts, no multicast,errors */
 #define E8390_RXOFF		0x20	/* EN0_RXCR: Accept no packets */
 #define E8390_TXCONFIG		0x80	/* EN0_TXCR: Normal transmit mode */
 #define E8390_TXOFF		0x02	/* EN0_TXCR: Transmitter off */

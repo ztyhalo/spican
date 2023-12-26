@@ -1293,10 +1293,10 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 	bank-width = <2>;
-	//fsl,weim-cs-timing = <0x01010089 0x00000001 0x0C200100
-	//                        0x00000008 0xA400840 0x00000000>;
-	fsl,weim-cs-timing = <0x00010089 0x00000001 0x09000000
-							0x00000008 0x9000000 0x00000000>;	
+	fsl,weim-cs-timing = <0x01010089 0x00000001 0x0C200100
+	                        0x00000008 0xA400840 0x00000000>;
+	//fsl,weim-cs-timing = <0x00010089 0x00000001 0x09000000
+	//						0x00000008 0x9000000 0x00000000>;	
 	phy-reset-gpios = <&gpio3 23 0>;
 	status = "okay";
 };
