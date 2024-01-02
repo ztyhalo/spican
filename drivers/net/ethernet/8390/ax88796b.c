@@ -196,6 +196,12 @@ static struct device_attribute device_attr_bcast_time =
 // static DEVICE_ATTR(boardcast_mark, S_IWUSR|S_IRUSR, show_boardcast_mark, set_boardcast_mark);
 // static DEVICE_ATTR(boardcast_max, S_IWUSR|S_IRUSR, show_boardcast_max, set_boardcast_max);
 // static DEVICE_ATTR(boardcast_time, S_IWUSR|S_IRUSR, show_boardcast_time, set_boardcast_time);
+static inline void boardcast_inifo_init(void)
+{
+	sbcast_info.bcast_mark = 1;
+	sbcast_info.bcast_max = 2048;
+	sbcast_info.bcast_time = 5000;
+}
 
 static int ax_get_link (struct ax_device *ax_local);
 static void 
@@ -3273,6 +3279,7 @@ static int ax88796b_drv_probe(struct platform_device *pdev)
 		mem = res->start;
 	}
 	DEBUG_PRI("mem=%x, size=%x\n", mem, resource_size(res));
+	boardcast_inifo_init();
 /*	
 	addr = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(addr)) {
