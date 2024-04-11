@@ -34,6 +34,7 @@
 #include <linux/slab.h>
 #include <linux/compiler.h>
 #include <linux/pstore_ram.h>
+#include <linux/memblock.h>
 
 #define RAMOOPS_KERNMSG_HDR "===="
 #define MIN_MEM_SIZE 4096UL
@@ -438,7 +439,7 @@ static int ramoops_probe(struct platform_device *pdev)
 	cxt->ecc_info = pdata->ecc_info;
 
 	paddr = cxt->phys_addr;
-
+	memblock_reserve(pdata->mem_address, pdata->mem_size);
 	dump_mem_sz = cxt->size - cxt->console_size - cxt->ftrace_size;
 	err = ramoops_init_przs(dev, cxt, &paddr, dump_mem_sz);
 	if (err)
