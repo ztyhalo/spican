@@ -449,7 +449,7 @@ static int __init init_pstore_fs(void)
 out:
 	return err;
 }
-module_init(init_pstore_fs)
+module_init(init_pstore_fs);
 
 MODULE_AUTHOR("Tony Luck <tony.luck@intel.com>");
 MODULE_LICENSE("GPL");

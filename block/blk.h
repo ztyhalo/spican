@@ -2,7 +2,8 @@
 #define BLK_INTERNAL_H
 
 #include <linux/idr.h>
-
+#include <linux/blk_types.h>
+#include <linux/blkdev.h>
 /* Amount of time in which a process may batch requests */
 #define BLK_BATCH_TIME	(HZ/50UL)
 

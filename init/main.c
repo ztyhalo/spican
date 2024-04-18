@@ -881,7 +881,7 @@ static int __ref kernel_init(void *unused)
 	panic("No working init found.  Try passing init= option to kernel. "
 	      "See Linux Documentation/init.txt for guidance.");
 }
-
+extern void __init pstore_blk_early_init(void);
 static noinline void __init kernel_init_freeable(void)
 {
 	/*
@@ -931,7 +931,9 @@ static noinline void __init kernel_init_freeable(void)
 		ramdisk_execute_command = NULL;
 		prepare_namespace();
 	}
-
+	#ifdef CONFIG_PSTORE_BLK
+		pstore_blk_early_init();
+	#endif
 	/*
 	 * Ok, we have completed the initial bootup, and
 	 * we're essentially up and running. Get rid of the
