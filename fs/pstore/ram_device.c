@@ -37,11 +37,11 @@
 
 static struct ramoops_platform_data ramoops_data = {
         .mem_size           =  0x2000000,
-        .mem_address        =  0x32000000,
+        .mem_address        =  0x15000000,
         .record_size        =  0x40000,
 		.console_size    	=  0x80000,
-		.ftrace_size    	=  0x80000,
-        //.dump_oops              = <...>,
+		//.ftrace_size    	=  0x80000,
+        .dump_oops 			= 1,
         //.ecc                    = <...>,
 };
 
@@ -68,6 +68,7 @@ static int __init ramdevice_init(void)
 {
 	int ret;
 	printk("wwwww ramdevice_init\n");
+	//memblock_reserve(ramoops_data.mem_address, ramoops_data.mem_size);
 	ret = platform_device_register(&ramoops_dev);
 	if (ret) {
 		printk("wwww unable to register platform device\n");

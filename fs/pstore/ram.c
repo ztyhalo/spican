@@ -132,25 +132,26 @@ ramoops_get_next_prz(struct persistent_ram_zone *przs[], uint *c, uint max,
 	return prz;
 }
 
-static void ramoops_read_kmsg_hdr(char *buffer, struct timespec *time,
+static int ramoops_read_kmsg_hdr(char *buffer, struct timespec *time,
 				  bool *compressed)
 {
 	char data_type;
-
-	if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lu.%lu-%c\n",
-			&time->tv_sec, &time->tv_nsec, &data_type) == 3) {
+	int header_length = 0;
+	if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lu.%lu-%c\n%n", &time->tv_sec,
+			&time->tv_nsec, &data_type, &header_length) == 3) {
 		if (data_type == 'C')
 			*compressed = true;
 		else
 			*compressed = false;
-	} else if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lu.%lu\n",
-			&time->tv_sec, &time->tv_nsec) == 2) {
+	} else if (sscanf(buffer, RAMOOPS_KERNMSG_HDR "%lu.%lu\n%n",
+			&time->tv_sec, &time->tv_nsec, &header_length) == 2) {
 			*compressed = false;
 	} else {
 		time->tv_sec = 0;
 		time->tv_nsec = 0;
 		*compressed = false;
 	}
+	return header_length;
 }
 
 static ssize_t ramoops_pstore_read(u64 *id, enum pstore_type_id *type,
@@ -162,7 +163,7 @@ static ssize_t ramoops_pstore_read(u64 *id, enum pstore_type_id *type,
 	ssize_t ecc_notice_size;
 	struct ramoops_context *cxt = psi->data;
 	struct persistent_ram_zone *prz;
-
+	int header_length;
 	prz = ramoops_get_next_prz(cxt->przs, &cxt->dump_read_cnt,
 				   cxt->max_dump_cnt, id, type,
 				   PSTORE_TYPE_DMESG, 1);
@@ -174,18 +175,22 @@ static ssize_t ramoops_pstore_read(u64 *id, enum pstore_type_id *type,
 					   1, id, type, PSTORE_TYPE_FTRACE, 0);
 	if (!prz)
 		return 0;
-
+	if (!persistent_ram_old(prz))
+			return 0;
 	size = persistent_ram_old_size(prz);
 
 	/* ECC correction notice */
 	ecc_notice_size = persistent_ram_ecc_string(prz, NULL, 0);
-
+	header_length = ramoops_read_kmsg_hdr(persistent_ram_old(prz), time,
+				compressed);
+	size -= header_length;
 	*buf = kmalloc(size + ecc_notice_size + 1, GFP_KERNEL);
 	if (*buf == NULL)
 		return -ENOMEM;
 
-	memcpy(*buf, persistent_ram_old(prz), size);
-	ramoops_read_kmsg_hdr(*buf, time, compressed);
+	memcpy(*buf, (char *)persistent_ram_old(prz) + header_length, size);
+	//memcpy(*buf, persistent_ram_old(prz), size);
+	//ramoops_read_kmsg_hdr(*buf, time, compressed);
 	persistent_ram_ecc_string(prz, *buf + size, ecc_notice_size + 1);
 
 	return size + ecc_notice_size;
@@ -495,7 +500,7 @@ static int ramoops_probe(struct platform_device *pdev)
 	mem_address = pdata->mem_address;
 	record_size = pdata->record_size;
 	dump_oops = pdata->dump_oops;
-
+	
 	pr_info("attached 0x%lx@0x%llx, ecc: %d/%d\n",
 		cxt->size, (unsigned long long)cxt->phys_addr,
 		cxt->ecc_info.ecc_size, cxt->ecc_info.block_size);
