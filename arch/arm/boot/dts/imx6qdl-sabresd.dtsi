@@ -335,7 +335,7 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_enet>;
 	phy-mode = "rgmii";
-	phy-reset-gpios = <&gpio1 25 0>;
+	phy-reset-gpios = <&gpio3 20 0>;
 	fsl,magic-packet;
 	status = "okay";
       mdio {
