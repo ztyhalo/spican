@@ -36,10 +36,10 @@
 
 
 static struct ramoops_platform_data ramoops_data = {
-        .mem_size           =  0x2000000,
-        .mem_address        =  0x15000000,
-        .record_size        =  0x40000,
-		.console_size    	=  0x80000,
+        .mem_size           =  PSTORE_RAM_SZIE,
+        .mem_address        =  PSTORE_RAM_ADDDR,
+        .record_size        =  PSTORE_RAM_RECORD_SIZE,
+		.console_size    	=  PSTORE_RAM_CONSOLE_SIZE,
 		//.ftrace_size    	=  0x80000,
         .dump_oops 			= 1,
         //.ecc                    = <...>,

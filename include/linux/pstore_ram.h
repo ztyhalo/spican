@@ -23,6 +23,11 @@
 #include <linux/types.h>
 #include <linux/init.h>
 
+#define PSTORE_RAM_SZIE 			(PSTORE_RAM_RECORD_SIZE+PSTORE_RAM_CONSOLE_SIZE)
+#define PSTORE_RAM_ADDDR			0x15000000
+#define PSTORE_RAM_RECORD_SIZE		SZ_4M
+#define PSTORE_RAM_CONSOLE_SIZE		SZ_4M
+
 struct persistent_ram_buffer;
 struct rs_control;
 
