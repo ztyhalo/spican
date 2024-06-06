@@ -8,8 +8,8 @@ make hndz_defconfig
 make zImage -j12
 make imx6dl-sabresd.dtb
 
-scp arch/arm/boot/zImage root@169.254.1.219:/home/root
-scp arch/arm/boot/dts/imx6dl-sabresd.dtb root@169.254.1.219:/home/root
+scp arch/arm/boot/zImage root@169.254.1.83:/home/root
+scp arch/arm/boot/dts/imx6dl-sabresd.dtb root@169.254.1.83:/home/root
 
 exit 0
 

@@ -18,7 +18,6 @@
 #include <linux/string.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
-#include <linux/pstore_ram.h>
 #include <asm/setup.h>  /* for COMMAND_LINE_SIZE */
 #ifdef CONFIG_PPC
 #include <asm/machdep.h>
@@ -792,9 +791,7 @@ int __init early_init_dt_scan_memory(unsigned long node, const char *uname,
 			continue;
 		pr_debug(" - %llx ,  %llx\n", (unsigned long long)base,
 		    (unsigned long long)size);
-		//early_init_dt_add_memory_arch(base, size);
-		early_init_dt_add_memory_arch(base, (PSTORE_RAM_ADDDR-0x10000000));
-		early_init_dt_add_memory_arch(base+(PSTORE_RAM_ADDDR-0x10000000)+PSTORE_RAM_SZIE, size-(PSTORE_RAM_ADDDR-0x10000000)-PSTORE_RAM_SZIE);
+		early_init_dt_add_memory_arch(base, size);
 	}
 
 	return 0;

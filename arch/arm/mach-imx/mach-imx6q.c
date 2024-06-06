@@ -466,6 +466,9 @@ static void __init imx6q_csi_mux_init(void)
 }
 
 #define OCOTP_MACn(n)	(0x00000620 + (n) * 0x10)
+#define OCOTP_CFGn(n)	(0x00000410 + (n) * 0x10)
+extern unsigned int system_serial_low;
+extern unsigned int system_serial_high;
 void __init imx6_enet_mac_init(const char *compatible)
 {
 	struct device_node *ocotp_np, *enet_np, *from = NULL;
@@ -474,6 +477,7 @@ void __init imx6_enet_mac_init(const char *compatible)
 	u32 macaddr_low;
 	u32 macaddr_high = 0;
 	u32 macaddr1_high = 0;
+
 	u8 *macaddr;
 	int i;
 
@@ -504,6 +508,10 @@ void __init imx6_enet_mac_init(const char *compatible)
 			macaddr1_high = readl_relaxed(base + OCOTP_MACn(2));
 		else
 			macaddr_high = readl_relaxed(base + OCOTP_MACn(0));
+		
+		system_serial_high = readl_relaxed(base + OCOTP_CFGn(0));
+		system_serial_low = readl_relaxed(base + OCOTP_CFGn(1));
+		
 
 		newmac = kzalloc(sizeof(*newmac) + 6, GFP_KERNEL);
 		if (!newmac)

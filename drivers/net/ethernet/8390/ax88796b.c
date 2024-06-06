@@ -245,7 +245,28 @@ static inline struct ax_device *ax_get_priv (struct net_device *ndev)
 {
 	return (struct ax_device *) netdev_priv (ndev);
 }
+static int __init etherm_addr(char *addr)
+{
+	unsigned int serial;
 
+	if (system_serial_low == 0 && system_serial_high == 0)
+	{
+		printk("hndz serial error!\n");
+		return -ENODEV;
+	}
+
+	serial = system_serial_low;
+
+	printk("hndz serial 0x%x!\n", serial);
+
+	addr[0] = 2;
+	addr[1] = 0x12;
+	addr[2] = (serial >> 24);
+	addr[3] = serial >> 16;
+	addr[4] = serial >> 8;
+	addr[5] = serial;
+	return 0;
+}
 /*  
  *  ======================================================================
  *   MII interface support
@@ -1690,6 +1711,7 @@ static void ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
 	}
 #else
 	//  ds2460_read_generic(pMac, 0x90, 6);
+	etherm_addr(pMac);	
 	if (!is_valid_ether_addr (pMac)) {
 		PRINTK (DRIVER_MSG, "MAC read from ds2460 is invalid, so use random MAC address\n");
 		random_ether_addr(pMac);
