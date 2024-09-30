@@ -12,7 +12,7 @@ scp arch/arm/boot/zImage root@169.254.1.83:/home/root
 scp arch/arm/boot/dts/imx6dl-sabresd.dtb root@169.254.1.83:/home/root
 
 exit 0
-
+ll 
 #make distclean
 #make imx_v7_defconfig
 make menuconfig

@@ -18,105 +18,9 @@
  * Boston, MA  02110-1301, USA.
  */
 
-#include <linux/clk.h>
-#include <linux/completion.h>
-#include <linux/delay.h>
-#include <linux/dmaengine.h>
-#include <linux/dma-mapping.h>
-#include <linux/err.h>
-#include <linux/gpio.h>
-#include <linux/interrupt.h>
-#include <linux/io.h>
-#include <linux/irq.h>
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/platform_device.h>
-#include <linux/slab.h>
-#include <linux/spi/spi.h>
-#include <linux/spi/spi_bitbang.h>
-#include <linux/types.h>
-#include <linux/of.h>
-#include <linux/of_device.h>
-#include <linux/of_gpio.h>
+#include "spi-imx.h"
 
-#include <linux/platform_data/dma-imx.h>
-#include <linux/platform_data/spi-imx.h>
-
-#define DRIVER_NAME "spi_imx"
-
-#define MXC_CSPIRXDATA		0x00
-#define MXC_CSPITXDATA		0x04
-#define MXC_CSPICTRL		0x08
-#define MXC_CSPIINT		0x0c
-#define MXC_RESET		0x1c
-
-/* generic defines to abstract from the different register layouts */
-#define MXC_INT_RR	(1 << 0) /* Receive data ready interrupt */
-#define MXC_INT_TE	(1 << 1) /* Transmit FIFO empty interrupt */
-
-/* The maximum  bytes that a sdma BD can transfer.*/
-#define MAX_SDMA_BD_BYTES  (1 << 15)
-/* 3 Sec for 1MB or less than 1MB, else change with the transfer length */
-#define IMX_DEFAULT_DMA_TIMEOUT (msecs_to_jiffies(3000))
-#define IMX_DMA_TIMEOUT(len) ((len < 0x100000) ? IMX_DEFAULT_DMA_TIMEOUT : \
-				len * IMX_DEFAULT_DMA_TIMEOUT / 0x100000)
-struct spi_imx_config {
-	unsigned int speed_hz;
-	unsigned int bpw;
-	unsigned int mode;
-	u8 cs;
-};
-
-enum spi_imx_devtype {
-	IMX1_CSPI,
-	IMX21_CSPI,
-	IMX27_CSPI,
-	IMX31_CSPI,
-	IMX35_CSPI,	/* CSPI on all i.mx except above */
-	IMX51_ECSPI,	/* ECSPI on i.mx51 and later */
-};
-
-struct spi_imx_data;
-
-struct spi_imx_devtype_data {
-	void (*intctrl)(struct spi_imx_data *, int);
-	int (*config)(struct spi_imx_data *, struct spi_imx_config *);
-	void (*trigger)(struct spi_imx_data *);
-	int (*rx_available)(struct spi_imx_data *);
-	void (*reset)(struct spi_imx_data *);
-	enum spi_imx_devtype devtype;
-};
-
-struct spi_imx_data {
-	struct spi_bitbang bitbang;
-
-	struct completion xfer_done;
-	void __iomem *base;
-	int irq;
-	struct clk *clk_per;
-	struct clk *clk_ipg;
-	unsigned long spi_clk;
-
-	unsigned int count;
-	void (*tx)(struct spi_imx_data *);
-	void (*rx)(struct spi_imx_data *);
-	void *rx_buf;
-	const void *tx_buf;
-	unsigned int txfifo; /* number of words pushed in tx FIFO */
-
-	/* DMA */
-	unsigned int dma_is_inited;
-	unsigned int dma_finished;
-	bool usedma;
-	u32 rx_wml;
-	u32 tx_wml;
-	u32 rxt_wml;
-	struct completion dma_rx_completion;
-	struct completion dma_tx_completion;
-
-	const struct spi_imx_devtype_data *devtype_data;
-	int chipselect[0];
-};
+static int gSpiStage = 0;
 
 static inline int is_imx27_cspi(struct spi_imx_data *d)
 {
@@ -207,9 +111,10 @@ static bool spi_imx_can_dma(struct spi_master *master, struct spi_device *spi,
 	// printk("zty spi imx can dma %d !\n", transfer->len);
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(master);
 
-	if (spi_imx->dma_is_inited &&
-		(transfer->len > spi_imx_get_fifosize(spi_imx)) &&
-		(transfer->len > spi_imx_get_fifosize(spi_imx)))
+	// if (spi_imx->dma_is_inited &&
+	// 	(transfer->len > spi_imx_get_fifosize(spi_imx)) &&
+	// 	(transfer->len > spi_imx_get_fifosize(spi_imx)))
+	if (spi_imx->dma_is_inited )
 		return true;
 	return false;
 }
@@ -380,6 +285,11 @@ static int __maybe_unused mx51_ecspi_config(struct spi_imx_data *spi_imx,
 		spi_imx->tx_wml = spi_imx_get_fifosize(spi_imx) / 4;
 		spi_imx->rx_wml = spi_imx_get_fifosize(spi_imx) / 2;
 		spi_imx->rxt_wml = spi_imx_get_fifosize(spi_imx) / 2;
+
+		spi_imx->tx_wml = 1;
+		spi_imx->rx_wml = 1;
+		spi_imx->rxt_wml = 1;
+
 		rx_wml_cfg = spi_imx->rx_wml << MX51_ECSPI_DMA_RX_WML_OFFSET;
 		tx_wml_cfg = spi_imx->tx_wml << MX51_ECSPI_DMA_TX_WML_OFFSET;
 		rxt_wml_cfg = spi_imx->rxt_wml << MX51_ECSPI_DMA_RXT_WML_OFFSET;
@@ -783,6 +693,8 @@ static int spi_imx_setupxfer(struct spi_device *spi,
 	config.mode = spi->mode;
 	config.cs = spi->chip_select;
 
+	// printk("hndz spi_imx_setupxfer!\n");
+
 	if (!config.speed_hz)
 		config.speed_hz = spi->max_speed_hz;
 	if (!config.bpw)
@@ -841,6 +753,7 @@ static int spi_imx_sdma_init(struct device *dev, struct spi_imx_data *spi_imx,
 	slave_config.dst_addr = res->start + MXC_CSPITXDATA;
 	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
 	slave_config.dst_maxburst = spi_imx_get_fifosize(spi_imx) / 4;
+	slave_config.dst_maxburst = 1;
 	ret = dmaengine_slave_config(master->dma_tx, &slave_config);
 	if (ret) {
 		dev_err(dev, "error in TX dma configuration.\n");
@@ -859,6 +772,7 @@ static int spi_imx_sdma_init(struct device *dev, struct spi_imx_data *spi_imx,
 	slave_config.src_addr = res->start + MXC_CSPIRXDATA;
 	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
 	slave_config.src_maxburst = spi_imx_get_fifosize(spi_imx) / 2;
+	slave_config.src_maxburst = 1;
 	ret = dmaengine_slave_config(master->dma_rx, &slave_config);
 	if (ret) {
 		dev_err(dev, "error in RX dma configuration.\n");
@@ -885,12 +799,56 @@ static void spi_imx_dma_rx_callback(void *cookie)
 	struct spi_imx_data *spi_imx = (struct spi_imx_data *)cookie;
 
 	complete(&spi_imx->dma_rx_completion);
+
 }
 
 static void spi_imx_dma_tx_callback(void *cookie)
 {
 	struct spi_imx_data *spi_imx = (struct spi_imx_data *)cookie;
 
+	complete(&spi_imx->dma_tx_completion);
+}
+
+static void spi_imx_irq_dma_rx_callback(void *cookie)
+{
+	struct spi_device * spi = (struct spi_device *) cookie;
+
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+
+	complete(&spi_imx->dma_rx_completion);
+	gSpiStage = 0;
+	spi_imx->dma_finished = 1;
+	spi_imx->devtype_data->trigger(spi_imx);
+
+	ndelay(100);
+	spi_imx_chipselect(spi, 0);
+	ndelay(100);
+}
+
+
+void spi_imx_irq_rx_callback(void *cookie)
+{
+	struct spi_device * spi = (struct spi_device *) cookie;
+
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	printk("hndz irq callback!\n");
+
+}
+
+void spi_imx_irq_tx_callback(void *cookie)
+{
+	struct spi_device * spi = (struct spi_device *) cookie;
+
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	printk("hndz irq tx callback!\n");
+
+}
+
+static void spi_imx_irq_dma_tx_callback(void *cookie)
+{
+
+	struct spi_imx_data *spi_imx = (struct spi_imx_data *)cookie;
+	gSpiStage = 5;
 	complete(&spi_imx->dma_tx_completion);
 }
 
@@ -1024,15 +982,16 @@ static int spi_imx_transfer(struct spi_device *spi,
 //	printk("zty spi spi_imx_transfer!\n");
 	if (spi_imx->bitbang.master->can_dma &&
 	    spi_imx_can_dma(spi_imx->bitbang.master, spi, transfer)) {
-			printk("zty spi dma transfer!\n");
+			// printk("zty spi dma transfer!\n");
 		spi_imx->usedma = true;
 		ret = spi_imx_dma_transfer(spi_imx, transfer);
 		if (ret != -EAGAIN)
 			return ret;
 	}
-	spi_imx->usedma = false;
-//	printk("zty spi pio transfer!\n");
-	return spi_imx_pio_transfer(spi, transfer);
+	// spi_imx->usedma = false;
+	// printk("zty spi pio transfer!\n");
+	// return spi_imx_pio_transfer(spi, transfer);
+	return -EAGAIN;
 }
 
 static int spi_imx_setup(struct spi_device *spi)
@@ -1072,6 +1031,373 @@ spi_imx_prepare_message(struct spi_master *master, struct spi_message *msg)
 	}
 
 	return 0;
+}
+
+static int hndz_spi_map_buf(struct spi_master *master, struct device *dev,
+		       struct sg_table *sgt, void *buf, size_t len,
+		       enum dma_data_direction dir)
+{
+	const bool vmalloced_buf = is_vmalloc_addr(buf);
+	const int desc_len = vmalloced_buf ? PAGE_SIZE : master->max_dma_len;
+	const int sgs = DIV_ROUND_UP(len, desc_len);
+	struct page *vm_page;
+	void *sg_buf;
+	size_t min;
+	int i, ret;
+
+	ret = sg_alloc_table(sgt, sgs, GFP_KERNEL);
+	if (ret != 0)
+		return ret;
+
+	for (i = 0; i < sgs; i++) {
+		min = min_t(size_t, len, desc_len);
+
+		if (vmalloced_buf) {
+			vm_page = vmalloc_to_page(buf);
+			if (!vm_page) {
+				sg_free_table(sgt);
+				return -ENOMEM;
+			}
+			sg_set_page(&sgt->sgl[i], vm_page,
+				    min, offset_in_page(buf));
+		} else {
+			sg_buf = buf;
+			sg_set_buf(&sgt->sgl[i], sg_buf, min);
+		}
+
+
+		buf += min;
+		len -= min;
+	}
+
+	ret = dma_map_sg(dev, sgt->sgl, sgt->nents, dir);
+	if (!ret)
+		ret = -ENOMEM;
+	if (ret < 0) {
+		sg_free_table(sgt);
+		return ret;
+	}
+
+	sgt->nents = ret;
+
+	return 0;
+}
+
+static void hndz_spi_unmap_buf(struct spi_master *master, struct device *dev,
+			  struct sg_table *sgt, enum dma_data_direction dir)
+{
+	if (sgt->orig_nents) {
+		dma_unmap_sg(dev, sgt->sgl, sgt->orig_nents, dir);
+		sg_free_table(sgt);
+	}
+}
+
+static int hndz_spi_unmap_msg(struct spi_master *master, struct spi_message *msg)
+{
+	struct spi_transfer *xfer;
+	struct device *tx_dev, *rx_dev;
+
+	if (!master->cur_msg_mapped || !master->can_dma)
+		return 0;
+
+	tx_dev = master->dma_tx->device->dev;
+	rx_dev = master->dma_rx->device->dev;
+
+	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+		if (!master->can_dma(master, msg->spi, xfer))
+			continue;
+
+		hndz_spi_unmap_buf(master, rx_dev, &xfer->rx_sg, DMA_FROM_DEVICE);
+		hndz_spi_unmap_buf(master, tx_dev, &xfer->tx_sg, DMA_TO_DEVICE);
+	}
+
+	return 0;
+}
+
+static int hndz_spi_map_msg(struct spi_master *master, struct spi_message *msg)
+{
+	struct device *tx_dev, *rx_dev;
+	struct spi_transfer *xfer;
+	int ret;
+
+	if (!master->can_dma)
+		return 0;
+
+	tx_dev = master->dma_tx->device->dev;
+	rx_dev = master->dma_rx->device->dev;
+
+	list_for_each_entry(xfer, &msg->transfers, transfer_list) {
+		if (!master->can_dma(master, msg->spi, xfer))
+			continue;
+
+		if (xfer->tx_buf != NULL) {
+			// printk("hndz xfer tx buf map!\n");
+			ret = hndz_spi_map_buf(master, tx_dev, &xfer->tx_sg,
+					  (void *)xfer->tx_buf, xfer->len,
+					  DMA_TO_DEVICE);
+			if (ret != 0)
+				return ret;
+		}
+
+		if (xfer->rx_buf != NULL) {
+			// printk("hndz xfer rx buf map!\n");
+			ret = hndz_spi_map_buf(master, rx_dev, &xfer->rx_sg,
+					  xfer->rx_buf, xfer->len,
+					  DMA_FROM_DEVICE);
+			if (ret != 0) {
+				printk("hndz xfer rx buf map DMA_TO_DEVICE!\n");
+				hndz_spi_unmap_buf(master, tx_dev, &xfer->tx_sg,
+					      DMA_TO_DEVICE);
+				return ret;
+			}
+		}
+	}
+
+	master->cur_msg_mapped = true;
+
+	return 0;
+}
+
+
+
+
+int spi_imx_irq_dma_transfer(struct spi_device * spi, struct spi_transfer *transfer, dma_async_tx_callback rxcallback, dma_async_tx_callback txcallback)
+{
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	struct dma_async_tx_descriptor *desc_tx = NULL, *desc_rx = NULL;
+	int ret = 0;
+	// int left = 0;
+	struct spi_master *master = spi_imx->bitbang.master;
+	struct sg_table *tx = &transfer->tx_sg, *rx = &transfer->rx_sg;
+
+	// pr_info_once("hndz irq first spi tx len %d rx len %d!\n", tx->nents, rx->nents);
+	if (tx) {
+		desc_tx = dmaengine_prep_slave_sg(master->dma_tx,
+					tx->sgl, tx->nents, DMA_TO_DEVICE,
+					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+		if (!desc_tx)
+		{
+			printk("hndz desc tx error len %d!\n", transfer->len);
+			goto irq_no_dma;
+		}
+
+		if(txcallback != NULL)
+		{
+			desc_tx->callback = txcallback;
+			desc_tx->callback_param = (void *)spi;
+		}
+		else
+		{
+			desc_tx->callback = spi_imx_irq_dma_tx_callback;
+			desc_tx->callback_param = (void *)spi_imx;
+		}
+		
+		dmaengine_submit(desc_tx);
+	}
+	if (rx) {
+		struct scatterlist *sgl_last = &rx->sgl[rx->nents - 1];
+		unsigned int	orig_length = sgl_last->length;
+		int	wml_mask = ~(spi_imx->rx_wml - 1);
+		/*
+		 * Adjust the transfer lenth of the last scattlist if there are
+		 * some tail data, use PIO read to get the tail data since DMA
+		 * sometimes miss the last tail interrupt.
+		 */
+		// left = transfer->len % spi_imx->rx_wml;
+		// if (left)
+		// 	sgl_last->length = orig_length & wml_mask;
+
+		desc_rx = dmaengine_prep_slave_sg(master->dma_rx,
+					rx->sgl, rx->nents, DMA_FROM_DEVICE,
+					DMA_PREP_INTERRUPT | DMA_CTRL_ACK);
+		if (!desc_rx)
+		{
+			printk("hndz desc rx error!\n");
+			goto irq_no_dma;
+		}
+		if(rxcallback != NULL)
+		{
+			desc_rx->callback = rxcallback;
+			desc_rx->callback_param = (void *)spi;
+		}
+		else
+		{
+			desc_rx->callback = spi_imx_irq_dma_rx_callback;
+			desc_rx->callback_param = (void *)spi;
+		}
+		
+		dmaengine_submit(desc_rx);
+	}
+
+	reinit_completion(&spi_imx->dma_rx_completion);
+	reinit_completion(&spi_imx->dma_tx_completion);
+
+	/* Trigger the cspi module. */
+	spi_imx->dma_finished = 0;
+
+	spi_imx->devtype_data->trigger(spi_imx);
+
+	dma_async_issue_pending(master->dma_tx);
+	dma_async_issue_pending(master->dma_rx);
+	
+
+	return ret;
+
+irq_no_dma:
+	pr_warn_once("%s %s: irq DMA not available, falling back to PIO\n",
+		     dev_driver_string(&master->dev),
+		     dev_name(&master->dev));
+	return -EAGAIN;
+
+}
+
+int spi_imx_dma_wait(struct spi_device * spi, struct spi_transfer *transfer)
+{
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	int ret;
+	struct spi_master *master = spi_imx->bitbang.master;
+
+
+	ret = wait_for_completion_timeout(&spi_imx->dma_tx_completion,
+					  IMX_DMA_TIMEOUT(transfer->len));
+	if (!ret) {
+		pr_warn("%s %s: I/O Error in DMA TX:%x state %d\n",
+			dev_driver_string(&master->dev),
+			dev_name(&master->dev), transfer->len, gSpiStage);
+		dmaengine_terminate_all(master->dma_tx);
+	} else {
+		ret = wait_for_completion_timeout(&spi_imx->dma_rx_completion,
+				IMX_DMA_TIMEOUT(transfer->len));
+		if (!ret) {
+			pr_warn("%s %s: I/O Error in DMA RX:%x\n",
+				dev_driver_string(&master->dev),
+				dev_name(&master->dev), transfer->len);
+			spi_imx->devtype_data->reset(spi_imx);
+			dmaengine_terminate_all(master->dma_rx);
+		}
+		
+	}
+	// printk("hndz dma ret is %d len %d!\n", ret, transfer->len);
+	// spi_imx->dma_finished = 1;
+	// spi_imx->devtype_data->trigger(spi_imx);
+
+	if (!ret)
+		ret = -ETIMEDOUT;
+	else if (ret > 0)
+		ret = transfer->len;
+
+	// ndelay(100);
+	// spi_imx_chipselect(spi, 0);
+	// ndelay(100);
+
+	return ret;
+}
+
+int spi_imx_sdma_rt_stage1(struct spi_device *spi,struct spi_message *msg, struct spi_transfer *t, dma_async_tx_callback rxcallback, 
+							dma_async_tx_callback txcallback)
+{
+	struct spi_master *master = spi->master;
+	int ret = 0;
+	
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	msg->spi = spi;
+
+	ret = spi_imx_prepare_message(spi->master, msg);
+	if (ret) {
+		dev_err(&master->dev,
+			"failed to prepare message: %d\n", ret);
+		return ret;
+	}
+	master->cur_msg_prepared = true;
+	ret = hndz_spi_map_msg(master, msg);
+	if (ret) {
+		printk("hndz spi map msg error!\n");
+		msg->status = ret;
+		return ret;
+	}
+
+	spi_imx_setupxfer(spi, t);
+	spi_imx_chipselect(spi, 1);
+	ndelay(100);
+
+	// ret = spi_imx_transfer(spi, t);
+	spi_imx->usedma = true;
+	gSpiStage = 1;
+	ret = spi_imx_irq_dma_transfer(spi, t, rxcallback, txcallback);
+
+	return ret;
+}
+
+int spi_imx_sdma_rt_stage2(struct spi_device *spi,struct spi_message *msg, struct spi_transfer *t)
+{
+	int ret = 0;
+	ret = spi_imx_dma_wait(spi, t);
+
+	if(ret != t->len)
+	{
+		printk("hndz ret %d len %d!\n", ret, t->len);
+		ret = -EREMOTEIO;
+	}
+	else
+		ret = 0;
+
+	// ndelay(100);
+	// spi_imx_chipselect(spi, 0);
+	// ndelay(100);
+
+	return ret;
+
+}
+
+int spi_imx_sdma_rt(struct spi_device *spi,struct spi_message *msg, struct spi_transfer *t)
+{
+	// struct spi_master *master = spi->master;
+	// int ret = 0;
+	
+	// struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+
+	// msg->spi = spi;
+
+	// ret = spi_imx_prepare_message(spi->master, msg);
+	// if (ret) {
+	// 	dev_err(&master->dev,
+	// 		"failed to prepare message: %d\n", ret);
+	// 	return ret;
+	// }
+	// master->cur_msg_prepared = true;
+	// ret = hndz_spi_map_msg(master, msg);
+	// if (ret) {
+	// 	printk("hndz spi map msg error!\n");
+	// 	msg->status = ret;
+	// 	return ret;
+	// }
+
+	// spi_imx_setupxfer(spi, t);
+	// spi_imx_chipselect(spi, 1);
+	// ndelay(100);
+
+	// ret = spi_imx_transfer(spi, t);
+	// // spi_imx->usedma = true;
+	// // spi_imx_irq_dma_transfer(spi, t);
+	// // ret = spi_imx_dma_wait(spi, t);
+
+	// if(ret != t->len)
+	// {
+	// 	ret = -EREMOTEIO;
+	// }
+	// else
+	// 	ret = 0;
+
+	// ndelay(100);
+	// spi_imx_chipselect(spi, 0);
+	// ndelay(100);
+
+	int ret;
+	ret = spi_imx_sdma_rt_stage1(spi, msg, t, NULL, NULL);
+	ret = spi_imx_sdma_rt_stage2(spi, msg, t);
+
+	return ret;
+
 }
 
 static int

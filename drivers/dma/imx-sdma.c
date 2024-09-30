@@ -642,7 +642,10 @@ static void sdma_event_disable(struct sdma_channel *sdmac, unsigned int event)
 static void sdma_handle_channel_loop(struct sdma_channel *sdmac)
 {
 	if (sdmac->desc.callback)
+	{
 		sdmac->desc.callback(sdmac->desc.callback_param);
+		// printk("hndz callback %pF channel %d event_id0 %d!\n", sdmac->desc.callback, sdmac->channel, sdmac->event_id0);
+	}
 }
 
 static void sdma_update_channel_loop(struct sdma_channel *sdmac)
@@ -698,7 +701,11 @@ static void mxc_sdma_handle_channel_normal(struct sdma_channel *sdmac)
 
 	dma_cookie_complete(&sdmac->desc);
 	if (sdmac->desc.callback)
+	{
 		sdmac->desc.callback(sdmac->desc.callback_param);
+		// if(sdmac->event_id0 == 5)
+		// 	printk("hndz callback %pF channel %d event_id0 %d!\n", sdmac->desc.callback, sdmac->channel, sdmac->event_id0);
+	}
 }
 
 static void sdma_tasklet(unsigned long data)
@@ -719,6 +726,8 @@ static void sdma_tasklet(unsigned long data)
 		mxc_sdma_handle_channel_normal(sdmac);
 }
 
+extern void spi_imx_irq_rx_callback(void *cookie);
+extern void spi_imx_irq_tx_callback(void *cookie);
 static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 {
 	struct sdma_engine *sdma = dev_id;
@@ -739,7 +748,17 @@ static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 
 		spin_lock_irqsave(&sdmac->lock, flags);
 		if (sdmac->status == DMA_IN_PROGRESS || (sdmac->flags & IMX_DMA_SG_LOOP))
+		{
+			if(sdmac->event_id0 == 5)
+			{
+				spi_imx_irq_rx_callback(sdmac->desc.callback_param);
+			}
+			else if(sdmac->event_id0 == 6)
+			{
+				spi_imx_irq_tx_callback(sdmac->desc.callback_param);
+			}
 			tasklet_schedule(&sdmac->tasklet);
+		}
 		spin_unlock_irqrestore(&sdmac->lock, flags);
 
 		__clear_bit(channel, &stat);
@@ -1319,7 +1338,10 @@ static struct dma_async_tx_descriptor *sdma_prep_sg(
 	struct scatterlist *sg_src = src_sg, *sg_dst = dst_sg;
 
 	if (sdmac->status == DMA_IN_PROGRESS)
+	{
+		printk("hndz sdmac status is DMA_IN_PROGRESS!\n");
 		return NULL;
+	}
 
 	dev_dbg(sdma->dev, "setting up %d entries for channel %d.\n",
 			src_nents, channel);
@@ -1332,7 +1354,10 @@ static struct dma_async_tx_descriptor *sdma_prep_sg(
 	}
 
 	if (sdma_transfer_init(sdmac, direction))
+	{
+		printk("hndz sdmac transfer init error!\n");
 		goto err_out;
+	}
 
 	for_each_sg(src_sg, sg_src, src_nents, i) {
 		struct sdma_buffer_descriptor *bd = &sdmac->bd[i];
@@ -1365,7 +1390,10 @@ static struct dma_async_tx_descriptor *sdma_prep_sg(
 			ret = check_bd_buswidth(bd, sdmac, count, 0,
 						sg_src->dma_address);
 		if (ret)
+		{
+			printk("hndz check bd error!\n");
 			goto err_out;
+		}
 
 		param = BD_DONE | BD_EXTD | BD_CONT;
 
