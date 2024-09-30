@@ -351,8 +351,8 @@ static int mcp251x_spi_trans(struct spi_device *spi, int len)
 
 	spi_message_add_tail(&t, &m);
 
-	// ret = spi_imx_sdma_rt(spi, &m, &t);
-	ret = spi_sync(spi, &m);
+	ret = spi_imx_sdma_rt(spi, &m, &t);
+	//ret = spi_sync(spi, &m);
 	if (ret)
 		dev_err(&spi->dev, "spi transfer failed: ret = %d  state %d  gIn_stage %d len %d\n", ret, gRxTx_state, gIn_stage, len);
 	return ret;
@@ -703,6 +703,25 @@ static void spi_imx_irq_dma_tx_stage1_callback(void *cookie)
 	}
 	
 }
+
+void spi_imx_irq_rx_callback(void *cookie)
+{
+	// struct spi_device * spi = (struct spi_device *) cookie;
+
+	// struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	// printk("hndz irq callback!\n");
+
+}
+
+void spi_imx_irq_tx_callback(void *cookie)
+{
+	// struct spi_device * spi = (struct spi_device *) cookie;
+
+	// struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	// printk("hndz irq tx callback!\n");
+
+}
+
 
 static void mcp251x_async_read_2regs(struct spi_device *spi, uint8_t reg)
 {
@@ -1565,7 +1584,7 @@ static int mcp251x_open(struct net_device *net)
 	priv->tx_skb = NULL;
 	priv->tx_len = 0;
 
-	ret = request_threaded_irq(spi->irq, mcp251x_can_irq, mcp251x_can_ist,
+	ret = request_threaded_irq(spi->irq, NULL, mcp251x_can_ist,
 				   flags | IRQF_ONESHOT, DEVICE_NAME, priv);
 	if (ret) {
 		dev_err(&spi->dev, "failed to acquire irq %d\n", spi->irq);

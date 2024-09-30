@@ -826,23 +826,7 @@ static void spi_imx_irq_dma_rx_callback(void *cookie)
 }
 
 
-void spi_imx_irq_rx_callback(void *cookie)
-{
-	struct spi_device * spi = (struct spi_device *) cookie;
 
-	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
-	printk("hndz irq callback!\n");
-
-}
-
-void spi_imx_irq_tx_callback(void *cookie)
-{
-	struct spi_device * spi = (struct spi_device *) cookie;
-
-	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
-	printk("hndz irq tx callback!\n");
-
-}
 
 static void spi_imx_irq_dma_tx_callback(void *cookie)
 {
@@ -1340,6 +1324,8 @@ int spi_imx_sdma_rt_stage2(struct spi_device *spi,struct spi_message *msg, struc
 	}
 	else
 		ret = 0;
+
+	hndz_spi_unmap_msg(spi->master, msg);
 
 	// ndelay(100);
 	// spi_imx_chipselect(spi, 0);
