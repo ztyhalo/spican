@@ -726,8 +726,8 @@ static void sdma_tasklet(unsigned long data)
 		mxc_sdma_handle_channel_normal(sdmac);
 }
 
-extern void spi_imx_irq_rx_callback(void *cookie);
-extern void spi_imx_irq_tx_callback(void *cookie);
+// extern void spi_imx_irq_rx_callback(void *cookie);
+// extern void spi_imx_irq_tx_callback(void *cookie);
 static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 {
 	struct sdma_engine *sdma = dev_id;
@@ -749,14 +749,16 @@ static irqreturn_t sdma_int_handler(int irq, void *dev_id)
 		spin_lock_irqsave(&sdmac->lock, flags);
 		if (sdmac->status == DMA_IN_PROGRESS || (sdmac->flags & IMX_DMA_SG_LOOP))
 		{
-			if(sdmac->event_id0 == 5)
-			{
-				spi_imx_irq_rx_callback(sdmac->desc.callback_param);
-			}
-			else if(sdmac->event_id0 == 6)
-			{
-				spi_imx_irq_tx_callback(sdmac->desc.callback_param);
-			}
+			// if(sdmac->event_id0 == 5)
+			// {
+			// 	// sdmac->status = DMA_COMPLETE;
+			// 	spi_imx_irq_rx_callback(sdmac->desc.callback_param);
+			// }
+			// else if(sdmac->event_id0 == 6)
+			// {
+			// 	// sdmac->status = DMA_COMPLETE;
+			// 	spi_imx_irq_tx_callback(sdmac->desc.callback_param);
+			// }
 			tasklet_schedule(&sdmac->tasklet);
 		}
 		spin_unlock_irqrestore(&sdmac->lock, flags);
