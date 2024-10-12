@@ -1327,6 +1327,11 @@ static int flexcan_open(struct net_device *dev)
 #endif
 	netif_start_queue(dev);
 
+	if(dev->name != NULL)
+	{
+		printk("hndz open flexcan name %s!\n", dev->name);
+	}
+
 	return 0;
 
  out_free_irq:

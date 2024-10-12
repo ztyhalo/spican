@@ -236,9 +236,14 @@ static int gHaveSend = 0;
 static int grx_num = 0;
 static int gtx_num = 0;
 static u8     gBuf[SPI_TRANSFER_BUF_LEN];
+static u8     gTxBuf[SPI_TRANSFER_BUF_LEN];
 static u8 gintf, geflag;
 static int gDmaState = 0;
 static int girqDmaState = 0;
+static int gdeg = 0;
+static int gTxStop=0;
+static int gmcpUse = 0;
+static int gIrqNoProcess = 0;
 
 static const struct can_bittiming_const mcp251x_bittiming_const = {
 	.name = DEVICE_NAME,
@@ -443,7 +448,7 @@ static int mcp251x_spi_async_trans_callback(struct spi_device *spi, int len, dma
 	ret = spi_imx_sdma_rt_stage1(spi, &gMcp25_msg, &gMcp25_tf, spi_imx_irq_rx_callback, spi_imx_irq_tx_callback);
 	// ret = spi_sync(spi, &m);
 	if (ret)
-		dev_err(&spi->dev, "spi callback transfer failed: ret = %d rx %d tx %d gDmaState %d!\n", ret, grx_num, gtx_num, gDmaState);
+		dev_err(&spi->dev, "spi callback transfer failed: ret = %d rx %d tx %d girqDmaState %d!\n", ret, grx_num, gtx_num, girqDmaState);
 	return ret;
 }
 
@@ -504,7 +509,7 @@ static void spi_imx_irq_dma_rx_stage2_callback(void *cookie)
 static void mcp251x_async_read_rx_frame(struct spi_device *spi, int buf_idx, dma_async_tx_callback rxcallback)
 {
 	struct mcp251x_priv *priv = spi_get_drvdata(spi);
-
+	gmcpUse = 1;
 	priv->spi_tx_buf[RXBCTRL_OFF] = INSTRUCTION_READ_RXB(buf_idx);
 
 	mcp251x_spi_async_trans_callback(spi, SPI_TRANSFER_BUF_LEN, rxcallback, NULL);
@@ -560,7 +565,7 @@ static void mcp251x_async_read_rx_frame_end(struct spi_device *spi)
 		priv->net->stats.rx_bytes += frame->can_dlc;
 
 		// can_led_event(priv->net, CAN_LED_EVENT_RX);
-
+		printk("hndz read skb!\n");
 		netif_rx_ni(skb);
 	}
 	else
@@ -581,8 +586,9 @@ static void mcp251x_async_read_rx_nowait_frame_end(struct spi_device *spi)
 
 	skb = alloc_can_skb(priv->net, &frame);
 
-		if (!skb) {
+	if (!skb) {
 		dev_err(&spi->dev, "cannot allocate RX skb\n");
+		printk("hndz no alloc skb!\n");
 		priv->net->stats.rx_dropped++;
 		return;
 	}
@@ -618,8 +624,10 @@ static void mcp251x_async_read_rx_nowait_frame_end(struct spi_device *spi)
 		priv->net->stats.rx_bytes += frame->can_dlc;
 
 		// can_led_event(priv->net, CAN_LED_EVENT_RX);
-
+		// if(gdeg == 1)
+		// 	printk("hndz rec id 0x%x!\n", frame->can_id);
 		netif_rx_ni(skb);
+		// netif_rx(skb);
 	}
 
 }
@@ -694,6 +702,7 @@ static void spi_imx_irq_dma_tx_stage1_callback(void *cookie)
 		gDmaState = 0;
 
 		if (gintf & CANINTF_RX0IF) {
+			printk("hndz stage1 callback 2!\n");
 			gIn_stage = 2;
 
 		}
@@ -872,18 +881,17 @@ static void mcp251x_hw_irq_tx(struct spi_device *spi, struct can_frame *frame,
 	eid = frame->can_id & CAN_EFF_MASK; /* Extended ID */
 	rtr = (frame->can_id & CAN_RTR_FLAG) ? 1 : 0; /* Remote transmission */
 
-	gBuf[TXBCTRL_OFF] = INSTRUCTION_LOAD_TXB(tx_buf_idx);
-	gBuf[TXBSIDH_OFF] = sid >> SIDH_SHIFT;
-	gBuf[TXBSIDL_OFF] = ((sid & SIDL_SID_MASK) << SIDL_SID_SHIFT) |
+	gTxBuf[TXBCTRL_OFF] = INSTRUCTION_LOAD_TXB(tx_buf_idx);
+	gTxBuf[TXBSIDH_OFF] = sid >> SIDH_SHIFT;
+	gTxBuf[TXBSIDL_OFF] = ((sid & SIDL_SID_MASK) << SIDL_SID_SHIFT) |
 		(exide << SIDL_EXIDE_SHIFT) |
 		((eid >> SIDL_EID_SHIFT) & SIDL_EID_MASK);
-	gBuf[TXBEID8_OFF] = GET_BYTE(eid, 1);
-	gBuf[TXBEID0_OFF] = GET_BYTE(eid, 0);
-	gBuf[TXBDLC_OFF] = (rtr << DLC_RTR_SHIFT) | frame->can_dlc;
-	memcpy(gBuf + TXBDAT_OFF, frame->data, frame->can_dlc);
+	gTxBuf[TXBEID8_OFF] = GET_BYTE(eid, 1);
+	gTxBuf[TXBEID0_OFF] = GET_BYTE(eid, 0);
+	gTxBuf[TXBDLC_OFF] = (rtr << DLC_RTR_SHIFT) | frame->can_dlc;
+	memcpy(gTxBuf + TXBDAT_OFF, frame->data, frame->can_dlc);
 	gTx_stage = 1;
-	gIsDma = 1;
-	mcp251x_hw_irq_tx_frame(spi, gBuf, frame->can_dlc, tx_buf_idx);
+	mcp251x_hw_irq_tx_frame(spi, gTxBuf, frame->can_dlc, tx_buf_idx);
 
 
 	/* use INSTRUCTION_RTS, to avoid "repeated frame problem" */
@@ -963,7 +971,7 @@ static void mcp251x_hw_rx(struct spi_device *spi, int buf_idx)
 	priv->net->stats.rx_bytes += frame->can_dlc;
 
 	can_led_event(priv->net, CAN_LED_EVENT_RX);
-
+	printk("hndz hw rexxx!\n");
 	netif_rx_ni(skb);
 }
 
@@ -985,16 +993,23 @@ static void mcp251x_irq_tx_process(struct mcp251x_priv *priv)
 		if (priv->can.state == CAN_STATE_BUS_OFF) {
 			mcp251x_clean(net);
 		} else {
+			gmcpUse = 1;
 			gRxTx_state = 2;
 			frame = (struct can_frame *)priv->tx_skb->data;
 
 			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
 				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
+			// printk("hndz send is 0x%x!\n", frame->can_id);
 			mcp251x_hw_irq_tx(spi, frame, 0);
 			priv->tx_len = 1 + frame->can_dlc;
 			can_put_echo_skb(priv->tx_skb, net, 0);
 			// priv->tx_skb = NULL;
 		}
+	}
+	else
+	{
+		if(gTxStop == 1)
+			printk("hndz gTx error!\n");
 	}
 
 }
@@ -1007,31 +1022,37 @@ static netdev_tx_t mcp251x_hard_start_xmit(struct sk_buff *skb,
 	unsigned long flags;
 	struct can_frame *frame;
 
+	spin_lock_irqsave (&priv->spin_mcp_lock, flags);
 	if (priv->tx_skb || priv->tx_len) {
 		dev_warn(&spi->dev, "hard_xmit called while tx busy\n");
+		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
 		return NETDEV_TX_BUSY;
 	}
 
 	if (can_dropped_invalid_skb(net, skb))
+	{
+		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
 		return NETDEV_TX_OK;
-
+	}
+	gTxStop = 1;
 	netif_stop_queue(net);
 	priv->tx_skb = skb;
 	// queue_work(priv->wq, &priv->tx_work);
-	spin_lock_irqsave (&priv->spin_mcp_lock, flags);
+	
 	
 	if(gRxTx_state != 0)
 	{
-		printk("hndz spi is using %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
+		// printk("hndz spi is using %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
-		return NETDEV_TX_BUSY;
+		return NETDEV_TX_OK;
 	}
-	gRxTx_state = 2;
 
 	if (priv->tx_skb) {
 		if (priv->can.state == CAN_STATE_BUS_OFF) {
 			mcp251x_clean(net);
 		} else {
+			gmcpUse = 1;
+			gRxTx_state = 2;
 			frame = (struct can_frame *)priv->tx_skb->data;
 
 			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
@@ -1209,6 +1230,8 @@ static int mcp251x_stop(struct net_device *net)
 	struct mcp251x_priv *priv = netdev_priv(net);
 	struct spi_device *spi = priv->spi;
 
+	printk("hndz mcp251x stop  gRxTx_state %d gIn_stage %d  gTx_stage %d grx_num %d gtx_num %d gintf 0x%x geflag 0x%x gTxStop %d gIrqNoProcess %d gmcpUse %d!\n",
+	            gRxTx_state, gIn_stage , gTx_stage , grx_num , gtx_num , gintf, geflag, gTxStop, gIrqNoProcess ,gmcpUse);
 	close_candev(net);
 
 	priv->force_quit = 1;
@@ -1424,23 +1447,33 @@ static irqreturn_t mcp251x_can_irq(int irq, void *dev_id)
 	struct net_device *net = priv->net;
 
 	spin_lock_irqsave(&priv->spin_mcp_lock, flags);
-	if(gRxTx_state == 0)
+	 if(gRxTx_state == 0)
 	{
 		gRxTx_state = 1;
 		// if(gIsDma == 0)
+		if(gmcpUse == 0)
 		{
 			gIsDma = 1;
+			gmcpUse = 1;
 			gIn_stage = 1;
+			// gRxTx_state = 1;
 			// printk("hndz irq read 2regs!\n");
 			mcp251x_async_read_2regs(spi, CANINTF);//处理中断
 		}
-		// else
-		// 	printk("hndz mcp irq too much!\n");
+		else
+		{
+			printk("hndz mcp irq too much!\n");
+			// gIrqNoProcess = 1;
+		}
 	}
 	else
 	{
-		printk("hndz is irq use %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
+		gIrqNoProcess = 1;
 	}
+	// else
+	// {
+	// 	printk("hndz is irq use %d gIn_stage %d, gTx_stage %d!\n", gRxTx_state, gIn_stage, gTx_stage);
+	// }
 	spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
 	return IRQ_HANDLED;
 	// return IRQ_WAKE_THREAD;
@@ -1734,7 +1767,7 @@ int mcp251x_error_process(struct spi_device * spi)
 	return 0;
 
 }
-static int gdeg = 0;
+
 int spi_irq_process(struct spi_device * spi)
 {
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
@@ -1758,17 +1791,31 @@ int spi_irq_process(struct spi_device * spi)
 	{
 		switch (gTx_stage){
 			case 1:
-				if(gdeg == 1)
-					printk("hndz gDmaState %d!\n", gDmaState);
+				// if(gdeg == 1)
+				// 	printk("hndz gDmaState %d!\n", gDmaState);
 				mcp251x_hw_irq_tx_stage2(spi, 0);
 				gTx_stage  =2;
 			break;
 			case 2:
-				if(gdeg == 1)
-					printk("hndz send end!\n");
+				// if(gdeg == 1)
+				// 	printk("hndz send end!\n");
 				priv->tx_skb = NULL;
 				gTx_stage = 3;
 				gRxTx_state = 0;
+				// gIn_stage = 1;
+				gintf = 0;
+				geflag = 0;
+				gmcpUse = 0;
+				if(gIrqNoProcess == 1)
+				{
+					gRxTx_state = 1;
+					gIn_stage = 1;
+					gIrqNoProcess =0;
+					mcp251x_irq_read_2regs(spi, CANINTF);
+				}
+
+				// mcp251x_irq_read_2regs(spi, CANINTF);
+				// gIn_stage = 1;
 				
 			break;
 			default :
@@ -1797,6 +1844,8 @@ int spi_irq_process(struct spi_device * spi)
 					can_get_echo_skb(net, 0);
 					priv->tx_len = 0;
 				}
+				priv->tx_skb = NULL;
+				gTxStop = 0;
 				netif_wake_queue(net);
 			}
 
@@ -1804,16 +1853,17 @@ int spi_irq_process(struct spi_device * spi)
 			{
 				gIn_stage = 0;
 				gRxTx_state = 0;
+				gmcpUse = 0;
 
-				if(priv->tx_skb)
-					printk("hndz irq tx process!\n");
+				// if(priv->tx_skb)
+				// 	printk("hndz irq tx process!\n");
 				
 				mcp251x_irq_tx_process(priv);
-				if(priv->tx_skb)
-				{
-					printk("hndz irq tx end!\n");
-					gdeg = 1;
-				}
+				// if(priv->tx_skb)
+				// {
+				// 	printk("hndz irq tx end!\n");
+				// 	gdeg = 1;
+				// }
 				return 0;
 
 			}
@@ -1824,10 +1874,15 @@ int spi_irq_process(struct spi_device * spi)
 			case 1:
 			if (gintf & CANINTF_RX0IF) {
 				gIn_stage = 2;
+				
+				// if(gdeg == 1)
+				// 	printk("hndz rx0 ok 0x%x!\n", gintf);
+
 				mcp251x_async_read_rx_frame(spi, 0, NULL);
+				// if(gdeg == 1)
+				// 	printk("hndz rx0 end 0x%x!\n", gintf);
 				break;
 			}
-
 			if (gintf & CANINTF_RX1IF) {
 				gIn_stage = 0x12;
 				mcp251x_async_read_rx_frame(spi, 1, NULL);
@@ -1857,6 +1912,9 @@ int spi_irq_process(struct spi_device * spi)
 			case 2:
 			{
 				mcp251x_async_read_rx_nowait_frame_end(spi);
+
+				// if(gdeg == 1)
+				// 	printk("hndz nowait_frame_end1 0x%x!\n", gintf);
 				if (gintf & CANINTF_RX1IF) {
 					gIn_stage = 0x12;
 					mcp251x_async_read_rx_frame(spi, 1, NULL);
@@ -1916,7 +1974,7 @@ int spi_irq_process(struct spi_device * spi)
 		}	
 
 	}
-	gDmaState = 0;
+	// gDmaState = 0;
 	return 0;
 
 
@@ -2047,6 +2105,11 @@ static int mcp251x_open(struct net_device *net)
 
 	netif_wake_queue(net);
 	printk("zty mcp251x open ok!\n");
+
+	if(net->name != NULL)
+	{
+		printk("hndz mcp2515 net name is %s!\n", net->name);
+	}
 
 open_unlock:
 	mutex_unlock(&priv->mcp_lock);

@@ -4175,7 +4175,9 @@ static int process_backlog(struct napi_struct *napi, int quota)
 		struct sk_buff *skb;
 		unsigned int qlen;
 
+
 		while ((skb = __skb_dequeue(&sd->process_queue))) {
+
 			local_irq_enable();
 			__netif_receive_skb(skb);
 			local_irq_disable();
@@ -4374,6 +4376,10 @@ static void net_rx_action(struct softirq_action *h)
 		have = netpoll_poll_lock(n);
 
 		weight = n->weight;
+		// if(n->dev->name != NULL)
+		// {
+		// 	printk("net name %s!\n", n->dev->name);
+		// }
 
 		/* This NAPI_STATE_SCHED test is for avoiding a race
 		 * with netpoll's poll_napi().  Only the entity which
