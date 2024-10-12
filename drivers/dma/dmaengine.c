@@ -612,6 +612,11 @@ struct dma_chan *__dma_request_channel(const dma_cap_mask_t *mask,
 		 __func__,
 		 chan ? "success" : "fail",
 		 chan ? dma_chan_name(chan) : NULL);
+	printk("hndz dma %s: %s (%s)\n",
+		 __func__,
+		 chan ? "success" : "fail",
+		 chan ? dma_chan_name(chan) : NULL);
+		//  dump_stack();
 
 	return chan;
 }

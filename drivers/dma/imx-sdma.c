@@ -1866,6 +1866,8 @@ static struct dma_chan *sdma_xlate(struct of_phandle_args *dma_spec,
 	data.peripheral_type = dma_spec->args[1];
 	data.priority = dma_spec->args[2];
 
+	printk("hndz sdmac request %d peripheral_type %d priority%d!\n",data.dma_request, data.peripheral_type, data.priority);
+
 	/*
 	 * init dma_request2 to zero, which is not used by the dts.
 	 * For P2P, dma_request2 is init from dma_request_channel(),

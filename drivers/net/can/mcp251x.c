@@ -1441,12 +1441,13 @@ static void mcp251x_restart_work_handler(struct work_struct *ws)
 
 static irqreturn_t mcp251x_can_irq(int irq, void *dev_id)
 {
-	unsigned long flags;
+	// unsigned long flags;
 	struct mcp251x_priv *priv = dev_id;
 	struct spi_device *spi = priv->spi;
 	struct net_device *net = priv->net;
 
-	spin_lock_irqsave(&priv->spin_mcp_lock, flags);
+	// spin_lock_irqsave(&priv->spin_mcp_lock, flags);
+	spin_lock(&priv->spin_mcp_lock);
 	 if(gRxTx_state == 0)
 	{
 		gRxTx_state = 1;
@@ -1474,7 +1475,8 @@ static irqreturn_t mcp251x_can_irq(int irq, void *dev_id)
 	// {
 	// 	printk("hndz is irq use %d gIn_stage %d, gTx_stage %d!\n", gRxTx_state, gIn_stage, gTx_stage);
 	// }
-	spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
+	// spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
+	spin_unlock(&priv->spin_mcp_lock);
 	return IRQ_HANDLED;
 	// return IRQ_WAKE_THREAD;
 }
