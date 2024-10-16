@@ -131,6 +131,11 @@ static unsigned long imx_read_current_timer(void)
 	return __raw_readl(sched_clock_reg);
 }
 
+unsigned long hndz_read_current_timer(void)
+{
+	return __raw_readl(sched_clock_reg);
+}
+
 static int __init mxc_clocksource_init(struct clk *timer_clk)
 {
 	unsigned int c = clk_get_rate(timer_clk);
