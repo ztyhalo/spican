@@ -100,7 +100,6 @@ struct ax_device {
 	u32         time_num;
 	u32         storm_mark;
 	struct sk_buff *tx_skb;
-	int tx_len;
 #	define WAKEUP_MP	0x01
 #	define WAKEUP_LSCWE	0x02
 };

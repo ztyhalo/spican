@@ -96,9 +96,9 @@ static int mem = 0;
 static int irq = 0;
 static int weight = 0;
 
-extern unsigned long hndz_read_current_timer(void);
+// extern unsigned long hndz_read_current_timer(void);
 
-static unsigned long gtime1, gtime2, gtime3;
+// static unsigned long gtime1, gtime2, gtime3;
 
 
 #ifdef AX88796_SDMA_MODE
@@ -970,12 +970,12 @@ static irqreturn_t ax_sdma_interrupt (int irq, void *dev_id)
 
 #define EIM_CS0_PHY_START_ADDR 0x08000000	
 static struct dma_chan *dma_m2m_chan = NULL;
-static struct completion dma_m2m_tx_ok;				//DMA传输完成等待量
-static struct completion dma_m2m_rx_ok;				//DMA传输完成等待量
+// static struct completion dma_m2m_tx_ok;				//DMA传输完成等待量
+// static struct completion dma_m2m_rx_ok;				//DMA传输完成等待量
 static unsigned char * gEIMrxbuf = NULL;
 static unsigned char * gEIMtxbuf = NULL;
 static unsigned int    eim_rx_length;
-static unsigned short  eim_current_offset;
+
 static struct ax_pkt_hdr grx_frame;
 
 static dma_addr_t gdma_dst = 0;							//EIM DMA接收数据的目的地址	接收数据的源地址肯定是EIM的硬件映射地址
@@ -1075,7 +1075,7 @@ static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *n
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	void *ax_base = ax_local->membase;
 	int send_length;
-	unsigned long flags;
+
 	u8 ctepr=0, free_pages=0, need_pages;
 
 	send_length = skb->len;
@@ -1120,14 +1120,13 @@ static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *n
 			free_pages = TX_PAGES;
 	}
 
-	PRINTK (DEBUG_MSG, PFX " tx pkt len %d, need %d pages, free pages %d\n",
-		skb->len, need_pages, free_pages);
 
 	if (free_pages < need_pages) {
-		PRINTK (DEBUG_MSG, "free_pages < need_pages\n");
+		printk("hndz process free_pages < need_pages\n");
 		netif_stop_queue (ndev);
 		ax_local->tx_full = 1;
-		ax_local->irqlock = 0;	
+		ax_local->irqlock = 0;
+		ax_local->tx_skb = NULL;	
 		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 		return NETDEV_TX_BUSY;
 	}
@@ -1146,8 +1145,7 @@ static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *n
 
 	ax_local->irqlock = 0;	
 	ax_local->tx_skb = NULL;
-	ax_local->tx_len = 0;
-	// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+
 	gAxRxTx_state = 2;
 	CurrImr = ENISR_TX;
 	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
@@ -1171,19 +1169,24 @@ static void dma_m2m_rx_callback(void *data)
 	unsigned char rxing_page, this_frame, next_frame;
 	struct net_device *ndev = (struct net_device *)data;
 	u8 cmd;
+	struct ax_device *ax_local = ax_get_priv (ndev);
+
+	int pkt_len = eim_rx_length;
+
+	struct sk_buff *skb;
+	int status;
+
+	void *ax_base = ax_local->membase;
 
 	if(ndev == NULL)
 	{
 		printk("zty callback data error!\n");
 	}
-	gtime2 = hndz_read_current_timer();
-	struct ax_device *ax_local = ax_get_priv (ndev);
+
+	
 
 	spin_lock_irqsave (&ax_local->page_lock, flags);
-	int pkt_len = eim_rx_length;
 
-	struct sk_buff *skb;
-	int status;
 	skb = dev_alloc_skb (pkt_len + 2);
 	if (skb == NULL) {
 		printk(" Couldn't allocate a sk_buff"
@@ -1223,7 +1226,7 @@ static void dma_m2m_rx_callback(void *data)
 
 	gRxNumcount++;
  	
-    void *ax_base = ax_local->membase;
+   
 
 
 	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
@@ -1293,34 +1296,30 @@ static void dma_m2m_rx_callback(void *data)
 	return ;
 }
 
-static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, unsigned long data)
+static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, struct net_device * ndev)
 {
 
 	int ret = 0;
 	int ring_offset;
-	uint32_t i;
+	uint32_t i = 0;
 	struct dma_async_tx_descriptor *dma_m2m_desc;
+	unsigned int count;
+	// struct net_device *ndev = (struct net_device *)data;
+
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
 
 	eim_rx_length = size;
 	ring_offset = current_offset;	
-	unsigned int count = (eim_rx_length +2) & 0x7FE;
+	count = (eim_rx_length +2) & 0x7FE;
 
-	struct net_device *ndev = (struct net_device *)data;
+	
 	if(size > 2048)
 	{
 		printk("hndz net rec %d data too long!\n", size);
 		ret = -1;
 		return ret;
 	}
-
-	if(ndev == NULL)
-	{
-		printk("zty callback data error!\n");
-		ret = -2;
-		return ret;
-	}
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
 
 
 	if (ax_local->dmaing)
@@ -1342,7 +1341,6 @@ static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, 
 
 
 	eim_sdma_rx_init_config();
-	// gtime1 = hndz_read_current_timer();
 
 	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, gdma_dst,
 	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_DEV_TO_MEM);													
@@ -1355,7 +1353,7 @@ static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, 
 	
 	//设置dma传输完成后的回调函数	
 	dma_m2m_desc->callback = dma_m2m_rx_callback;
-	dma_m2m_desc->callback_param = data;
+	dma_m2m_desc->callback_param = (void *)ndev;
 	// printk("zty eim submit start 0x%lx!\n", jiffies);
 
 	while ((readb (ax_base + ADDR_SHIFT16(EN0_SR)) & ENSR_DMA_READY) == 0)
@@ -1470,7 +1468,7 @@ static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev
 
 	spin_lock_irqsave (&ax_local->page_lock, flags);
 
-	if (ax_local->tx_skb || ax_local->tx_len) {
+	if (ax_local->tx_skb) {
 		printk("hndz ax hard_xmit called while tx busy\n");
 		spin_unlock_irqrestore(&ax_local->page_lock, flags);
 		return NETDEV_TX_BUSY;
@@ -1479,7 +1477,6 @@ static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev
 	ax_local->tx_skb = skb;
 	if(gAxRxTx_state != 0)
 	{
-		// printk("hndz ax gAxRxTx_state %d!\n",gAxRxTx_state);
 		spin_unlock_irqrestore(&ax_local->page_lock, flags);
 		return NETDEV_TX_OK;
 	}
@@ -1525,12 +1522,8 @@ static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev
 			free_pages = TX_PAGES;
 	}
 
-	PRINTK (DEBUG_MSG, PFX " tx pkt len %d, need %d pages, free pages %d\n",
-		skb->len, need_pages, free_pages);
-
 	if (free_pages < need_pages) {
-		PRINTK (DEBUG_MSG, "free_pages < need_pages\n");
-		//printk("zty ax88796 start send!\n");
+		printk("hndz free_pages < need_pages\n");
 		netif_stop_queue (ndev);
 		ax_local->tx_full = 1;
 		ax_local->irqlock = 0;	
@@ -1539,17 +1532,6 @@ static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev
 		return NETDEV_TX_BUSY;
 	}
 
-	if (DEBUG_MSG & DEBUG_FLAGS) {
-		int i;
-		PRINTK (DEBUG_MSG, PFX " Dump tx pkt %d", skb->len);
-		for (i = 0; i < skb->len; i++) {
-			if ((i % 16) == 0)
-				PRINTK (DEBUG_MSG, "\n");
-			PRINTK (DEBUG_MSG, 
-				"%02x ", *(skb->data + i));
-		}
-		PRINTK (DEBUG_MSG, "\n");
-	}
 	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
 	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
 	if (free_pages == need_pages) {
@@ -1565,23 +1547,18 @@ static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev
 
 	ax_local->irqlock = 0;	
 	ax_local->tx_skb = NULL;
-	ax_local->tx_len = 0;
-	// printk("zty ax88796 start send ii!\n");
-	// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+
 	gAxRxTx_state = 2;
 	CurrImr = ENISR_TX;
 	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
 	
-
 	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	// mutex_unlock(&eim_lock);
+
 
 	dev_kfree_skb (skb);
 
 	ndev->trans_start = jiffies;
 	ax_local->stat.tx_bytes += send_length;
-	//  printk("hndz send end!\n");
-	PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
 
 	return NETDEV_TX_OK;
 }
@@ -3281,7 +3258,7 @@ ax_block_output (struct net_device *ndev, int count,
  * Purpose: begin packet transmission
  * ----------------------------------------------------------------------------
  */
-static int ax88796b_start_xmit (struct sk_buff *skb, struct net_device *ndev)
+ int ax88796b_start_xmit (struct sk_buff *skb, struct net_device *ndev)
 {
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	void *ax_base = ax_local->membase;
@@ -3472,8 +3449,8 @@ static int ax88796b_rx_poll(struct net_device *ndev, struct ax_device *ax_local,
 	int i;
 
 	//PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
-	unsigned long time1, time2;
-	time1 = hndz_read_current_timer();
+	// unsigned long time1, time2;
+	// time1 = hndz_read_current_timer();
 	for ( i = 0 ; i < budget && netif_running(ndev); i++) {
 
 		int pkt_len, pkt_stat;
@@ -3580,7 +3557,7 @@ static int ax88796b_rx_poll(struct net_device *ndev, struct ax_device *ax_local,
 		writeb (next_frame-1, ax_base + ADDR_SHIFT16(EN0_BOUNDARY));
 
 	}
-	time2 = hndz_read_current_timer();
+	// time2 = hndz_read_current_timer();
 	// printk("hndz 88796 time %lu num %d!\n", time2-time1, pkt_cnt);
 	//PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
 
@@ -3625,7 +3602,7 @@ static int ax88796b_poll(struct napi_struct *napi, int budget)
  * ----------------------------------------------------------------------------
  */
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
-static irqreturn_t ax_interrupt (int irq, void *dev_id)
+ irqreturn_t ax_interrupt (int irq, void *dev_id)
 #else
 static irqreturn_t ax_interrupt (int irq, void *dev_id, struct pt_regs * regs)
 #endif
