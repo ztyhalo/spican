@@ -1215,20 +1215,16 @@ static void dma_m2m_rx_callback(void *data)
 	ndev->last_rx = jiffies;
 	ax_local->stat.rx_packets++;
 	ax_local->stat.rx_bytes += pkt_len;
-	// if (pkt_stat & ENRSR_PHY)
-	// {
-	// 	ax_local->stat.multicast++;
-	// 	ax_local->boardcast_num++;
-	// 	// printk("zty multicast!\n");
-	// }
-
+	if (grx_frame.status & ENRSR_PHY)
+	{
+		ax_local->stat.multicast++;
+		ax_local->boardcast_num++;
+	}
 
 
 	gRxNumcount++;
  	
    
-
-
 	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
 	ax_local->dmaing = 0;
 
@@ -1599,20 +1595,17 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 	
 		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) != 0)
 		{
-			// printk("hndz 88796 interupt 0x%x!\n", interrupts);
 			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
 
 			if (interrupts & ENISR_TX) {
 
 				ax_tx_intr (ndev);
-				CurrImr = ENISR_ALL;
-				// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));				
+				CurrImr = ENISR_ALL;			
 			}
 
 			if (interrupts & (ENISR_RX | ENISR_RX_ERR | ENISR_OVER)) {
-				if(ax88796b_sdma_rx_poll(ndev, ax_local) ==1)
+				if(ax88796b_sdma_rx_poll(ndev, ax_local) == 1)
 				{
-					// CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
 					CurrImr = 0;
 				}
 				else
@@ -1620,7 +1613,6 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 					CurrImr = ENISR_ALL;
 					cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
 					writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
-					// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 					
 				}			
 				
@@ -1670,11 +1662,7 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 			}
 			else
 			{
-				if (interrupts & (ENISR_RX)) {
-					;
-				}
-				else
-				{
+				if (!(interrupts & (ENISR_RX))){
 					printk("hndz tx rx inter error 0x%x!\n", interrupts);
 				}
 				
@@ -1690,15 +1678,6 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 	else
 	{
 		;
-		// printk("hndz ax irq too much %d CurrImr 0x%x!\n", gAxRxTx_state, CurrImr);
-
-		// writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-		// printk("hndz read currimr is 0x%x!\n", readb (ax_base + ADDR_SHIFT16(EN0_IMR)));
-
-		// writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-		// printk("hndz irq is 0x%x!\n",  readb (ax_base + ADDR_SHIFT16(EN0_ISR)));
 	}
 
 	spin_unlock (&ax_local->page_lock);
