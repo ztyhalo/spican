@@ -1274,13 +1274,8 @@ static void dma_m2m_rx_callback(void *data)
 				i = 1;
 			 }
 		}
-
-		// gtime3 = hndz_read_current_timer();
-		// printk("hndz dma time %lu %lu!\n", gtime2-gtime1, gtime3-gtime2);
-		
-
-		// sdma_read_ok = 0;
 	}
+
 	if(i == 0)
 	{
 		if(ax_local->tx_skb != NULL)
@@ -1289,7 +1284,6 @@ static void dma_m2m_rx_callback(void *data)
 			status = ax88796b_send_data_process(ax_local->tx_skb, ndev);
 			if(status != 0)
 				printk("hndz call send ret is 0x%x!\n", status);
-			// gAxRxTx_state = 0;
 		}
 	}
 
@@ -1384,7 +1378,6 @@ static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, 
 	return 0;	
 }
 
-static int gdebugMark= 0;
 static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local)
 {
 	void *ax_base = ax_local->membase;
@@ -1406,16 +1399,11 @@ static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_l
 		 * Boundary is always a page behind.
 		 */
 		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
-		if(gdebugMark == 0)
-		{
-			printk("hndz rxing_page %d this_frame %d ax_local->rx_start_page %d!\n", rxing_page, this_frame, ax_local->rx_start_page);
-			gdebugMark  =1;
-		}
+
 		if (this_frame >= ax_local->stop_page)
 			this_frame = ax_local->rx_start_page;
 		
 		if (this_frame == rxing_page) {	/* Read all the frames? */
-			// printk("hndz read all!\n");
 			return 0;			/* Done for now */
 		}
 		current_offset = this_frame << 8;
@@ -1467,101 +1455,6 @@ static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_l
 
 	return ret;
 }
-static int ax88796b_sdma_txrx_poll(struct net_device *ndev, struct ax_device *ax_local)
-{
-	void *ax_base = ax_local->membase;
-	unsigned char rxing_page, this_frame, next_frame;
-	unsigned short current_offset;
-	// struct ax_pkt_hdr rx_frame;
-	int ret = 0;
-
-	if(netif_running(ndev)) 
-	{
-
-		int pkt_len, pkt_stat;
-
-		/* Get the rx page (incoming packet pointer). */
-		rxing_page = readb (ax_base + ADDR_SHIFT16(EN0_CURPAG));
-
-		/* 
-		 * Remove one frame from the ring.
-		 * Boundary is always a page behind.
-		 */
-		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
-		// if(gdebugMark == 0)
-		// {
-		// 	printk("hndz rxing_page %d this_frame %d ax_local->rx_start_page %d!\n", rxing_page, this_frame, ax_local->rx_start_page);
-		// 	gdebugMark  =1;
-		// }
-		if (this_frame >= ax_local->stop_page)
-			this_frame = ax_local->rx_start_page;
-		
-		if (this_frame == rxing_page) {	/* Read all the frames? */
-			// printk("hndz tx read all!\n");
-			return 0;			/* Done for now */
-		}
-		else
-		{
-			// printk("hndz have read rxing_page 0x%x this_frame 0x%x!\n", rxing_page, this_frame);
-			return 1;
-		}
-	}
-	else
-	{
-		printk("hndz netif_running no runing!\n");
-	}
-
-	return ret;
-}
-
-
-static int ax88796b_sdma_txrx_checkpoll(struct net_device *ndev, struct ax_device *ax_local)
-{
-	void *ax_base = ax_local->membase;
-	unsigned char rxing_page, this_frame, next_frame;
-	unsigned short current_offset;
-	// struct ax_pkt_hdr rx_frame;
-	int ret = 0;
-
-	if(netif_running(ndev)) 
-	{
-
-		int pkt_len, pkt_stat;
-
-		/* Get the rx page (incoming packet pointer). */
-		rxing_page = readb (ax_base + ADDR_SHIFT16(EN0_CURPAG));
-
-		/* 
-		 * Remove one frame from the ring.
-		 * Boundary is always a page behind.
-		 */
-		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
-		// if(gdebugMark == 0)
-		// {
-		// 	printk("hndz rxing_page %d this_frame %d ax_local->rx_start_page %d!\n", rxing_page, this_frame, ax_local->rx_start_page);
-		// 	gdebugMark  =1;
-		// }
-		if (this_frame >= ax_local->stop_page)
-			this_frame = ax_local->rx_start_page;
-		
-		if (this_frame == rxing_page) {	/* Read all the frames? */
-			// printk("hndz tx read all!\n");
-			return 0;			/* Done for now */
-		}
-		else
-		{
-			printk("hndz check have read rxing_page 0x%x this_frame 0x%x!\n", rxing_page, this_frame);
-			return 1;
-		}
-	}
-	else
-	{
-		printk("hndz netif_running no runing!\n");
-	}
-
-	return ret;
-}
-
 
 static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev)
 {
@@ -1692,8 +1585,7 @@ static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev
 
 	return NETDEV_TX_OK;
 }
-static int gIsRecMark = 0;
-static int gcurmark = 0;
+
 static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 {
 	struct net_device *ndev = dev_id;
@@ -1714,23 +1606,13 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 	if(gAxRxTx_state == 0)
 	{
 		
-		writeb (E8390_NODMA | E8390_PAGE3, ax_base + ADDR_SHIFT16(E8390_CMD));
+		writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
 
 		CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
-		if(gcurmark == 0)
-			printk("hndz CurrImr 0x%x!\n", CurrImr);
 
 		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
 		writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-		if(gcurmark == 0)
-		{
-			writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
 
-			printk("hndz write read 0x%x!\n", readb (ax_base + ADDR_SHIFT16(EN0_IMR)));
-
-			writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-			gcurmark = 1;
-		}
 
 		if (ax_local->irqlock) {
 			printk ("Interrupt occurred when irqlock locked\n");
@@ -1744,32 +1626,26 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
 
 			if (interrupts & ENISR_TX) {
-				// ax_tx_intr (ndev);
-				// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-				// CurrImr = ENISR_ALL;
-				 printk("hndz rx tx error!\n");
+
+				ax_tx_intr (ndev);
+				CurrImr = ENISR_ALL;
+				// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));				
 			}
 
 			if (interrupts & (ENISR_RX | ENISR_RX_ERR | ENISR_OVER)) {
 				if(ax88796b_sdma_rx_poll(ndev, ax_local) ==1)
 				{
-					CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
+					// CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
 					CurrImr = 0;
-					// printk("hndz sdma start!\n");
 				}
 				else
 				{
 					CurrImr = ENISR_ALL;
 					cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
 					writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
-					writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+					// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 					
-				}
-				// else
-				// {
-				// 	printk("hndz sdma rx error!\n");
-				// }
-				
+				}			
 				
 			}
 
@@ -1796,47 +1672,29 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 	else if (gAxRxTx_state == 2)
 	{		
 		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-		// writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+
 		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) != 0)
 		{
 			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR));
-			if (interrupts & ENISR_TX) {
+			if (interrupts & ENISR_TX) 
+			{
 				ax_tx_intr (ndev);
-				// CurrImr = ENISR_ALL;
-				// writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-				
+
 				gAxRxTx_state = 0;
-				// if(gIsRecMark == 1)
+				
+				CurrImr = 0;
+				writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
+				if(ax88796b_sdma_rx_poll(ndev, ax_local) != 1)
 				{
-					CurrImr = 0;
+					CurrImr = ENISR_ALL;
 					writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-					if(ax88796b_sdma_rx_poll(ndev, ax_local) ==1)
-					{						
-						gIsRecMark = 0;
-												
-					}
-					else
-					{
-						// printk("hndz gisrecmark error!\n");
-						CurrImr = ENISR_ALL;
-						writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-					}
 				}
-				// else
-				// {
-				// 	ax88796b_sdma_txrx_checkpoll(ndev, ax_local);
-				// }
-				// CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
+				
 			}
 			else
 			{
-				// printk("hndz tx tinter error %d!\n", interrupts);
 				if (interrupts & (ENISR_RX)) {
-					if(ax88796b_sdma_txrx_poll(ndev, ax_local) == 1)
-					{
-						gIsRecMark = 1;
-					}
-
+					;
 				}
 				else
 				{
@@ -1854,11 +1712,16 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 	}
 	else
 	{
-		printk("hndz ax irq too much %d!\n", gAxRxTx_state);
+		;
+		// printk("hndz ax irq too much %d CurrImr 0x%x!\n", gAxRxTx_state, CurrImr);
 
-		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+		// writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
 
-		printk("hndz irq is 0x%x!\n",  readb (ax_base + ADDR_SHIFT16(EN0_ISR)));
+		// printk("hndz read currimr is 0x%x!\n", readb (ax_base + ADDR_SHIFT16(EN0_IMR)));
+
+		// writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+		// printk("hndz irq is 0x%x!\n",  readb (ax_base + ADDR_SHIFT16(EN0_ISR)));
 	}
 
 	spin_unlock (&ax_local->page_lock);
