@@ -1382,18 +1382,16 @@ int spi_irq_process(struct spi_device * spi)
 	{
 		switch (gTx_stage){
 			case 1:
-				// if(gdeg == 1)
-				// 	printk("hndz gDmaState %d!\n", gDmaState);
+
 				mcp251x_hw_irq_tx_stage2(spi, 0);
 				gTx_stage  =2;
 			break;
 			case 2:
-				// if(gdeg == 1)
-				// 	printk("hndz send end!\n");
+
 				priv->tx_skb = NULL;
 				gTx_stage = 3;
 				gRxTx_state = 0;
-				// gIn_stage = 1;
+
 				gintf = 0;
 				geflag = 0;
 				gmcpUse = 0;
@@ -1405,8 +1403,6 @@ int spi_irq_process(struct spi_device * spi)
 					mcp251x_irq_read_2regs(spi, CANINTF);
 				}
 
-				// mcp251x_irq_read_2regs(spi, CANINTF);
-				// gIn_stage = 1;
 				
 			break;
 			default :
@@ -1446,8 +1442,6 @@ int spi_irq_process(struct spi_device * spi)
 				gRxTx_state = 0;
 				gmcpUse = 0;
 
-				// if(priv->tx_skb)
-				// 	printk("hndz irq tx process!\n");
 				if(gIrqNoProcess == 1)
 				{
 					gRxTx_state = 1;
@@ -1456,14 +1450,9 @@ int spi_irq_process(struct spi_device * spi)
 					mcp251x_irq_read_2regs(spi, CANINTF);
 					return 0;
 				}
-
 				
 				mcp251x_irq_tx_process(priv);
-				// if(priv->tx_skb)
-				// {
-				// 	printk("hndz irq tx end!\n");
-				// 	gdeg = 1;
-				// }
+
 				return 0;
 
 			}
@@ -1475,12 +1464,8 @@ int spi_irq_process(struct spi_device * spi)
 			if (gintf & CANINTF_RX0IF) {
 				gIn_stage = 2;
 				
-				// if(gdeg == 1)
-				// 	printk("hndz rx0 ok 0x%x!\n", gintf);
-
 				mcp251x_async_read_rx_frame(spi, 0, NULL);
-				// if(gdeg == 1)
-				// 	printk("hndz rx0 end 0x%x!\n", gintf);
+
 				break;
 			}
 			if (gintf & CANINTF_RX1IF) {
@@ -1506,15 +1491,13 @@ int spi_irq_process(struct spi_device * spi)
 				{
 					printk("hndz eroor process err!\n");
 				}
-				// mcp251x_error_process(spi);
+
 			}
 			break;
 			case 2:
 			{
 				mcp251x_async_read_rx_nowait_frame_end(spi);
 
-				// if(gdeg == 1)
-				// 	printk("hndz nowait_frame_end1 0x%x!\n", gintf);
 				if (gintf & CANINTF_RX1IF) {
 					gIn_stage = 0x12;
 					mcp251x_async_read_rx_frame(spi, 1, NULL);
@@ -1574,7 +1557,7 @@ int spi_irq_process(struct spi_device * spi)
 		}	
 
 	}
-	// gDmaState = 0;
+
 	return 0;
 
 
