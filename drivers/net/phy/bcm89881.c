@@ -781,18 +781,18 @@ static int bcm89881_read_status(struct phy_device *phydev)
 	if((val >= 0) && (val &MDIO_STAT1_LSTATUS))
 	{
 		if(phydev->link ==0)
-			printk("zty find link!\n");
+			printk("hndz find link!\n");
 		phydev->link = 1;
 
 	}
 	else
 	{
-		printk("zty find link down!\n");
+		printk("hndz find link down!\n");
 		phydev->link = 0;
 	}
 
 	if (AUTONEG_ENABLE == phydev->autoneg) {
-		printk("zty find state auto neg !\n");
+		printk("hndz find state auto neg !\n");
 		if (phydev->supported & (SUPPORTED_1000baseT_Half
 					| SUPPORTED_1000baseT_Full)) {
 			lpagb = phy_read(phydev, MII_STAT1000);
@@ -848,7 +848,7 @@ static int bcm89881_read_status(struct phy_device *phydev)
 
 		if (bmcr < 0)
 		{
-			printk("zty read 1 0 err!\n");
+			printk("hndz read 1 0 err!\n");
 			return bmcr;
 		}
 

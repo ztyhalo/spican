@@ -558,6 +558,7 @@ static int flexcan_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 }
 
+#ifndef IRQ_CAN_RX
 static void do_bus_err(struct net_device *dev,
 		       struct can_frame *cf, u32 reg_esr)
 {
@@ -612,6 +613,7 @@ static void do_bus_err(struct net_device *dev,
 		dev->stats.tx_errors++;
 }
 
+
 static int flexcan_poll_bus_err(struct net_device *dev, u32 reg_esr)
 {
 	struct sk_buff *skb;
@@ -629,6 +631,7 @@ static int flexcan_poll_bus_err(struct net_device *dev, u32 reg_esr)
 
 	return 1;
 }
+
 
 static void do_state(struct net_device *dev,
 		     struct can_frame *cf, enum can_state new_state)
@@ -734,6 +737,7 @@ static int flexcan_poll_state(struct net_device *dev, u32 reg_esr)
 	return 1;
 }
 
+
 static void flexcan_read_fifo(const struct net_device *dev,
 			      struct can_frame *cf)
 {
@@ -783,7 +787,7 @@ static int flexcan_read_frame(struct net_device *dev)
 
 	return 1;
 }
-#ifndef IRQ_CAN_RX
+
 static int flexcan_poll(struct napi_struct *napi, int quota)
 {
 	struct net_device *dev = napi->dev;
@@ -1335,10 +1339,10 @@ static int flexcan_open(struct net_device *dev)
 #endif
 	netif_start_queue(dev);
 
-	if(dev->name != NULL)
-	{
-		printk("hndz open flexcan name %s!\n", dev->name);
-	}
+	// if(dev->name != NULL)
+	// {
+	// 	printk("hndz open flexcan name %s!\n", dev->name);
+	// }
 
 	return 0;
 

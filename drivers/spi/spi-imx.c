@@ -965,18 +965,17 @@ static int spi_imx_transfer(struct spi_device *spi,
 {
 	int ret;
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
-//	printk("zty spi spi_imx_transfer!\n");
+
 	if (spi_imx->bitbang.master->can_dma &&
 	    spi_imx_can_dma(spi_imx->bitbang.master, spi, transfer)) {
-			// printk("zty spi dma transfer!\n");
 		spi_imx->usedma = true;
 		ret = spi_imx_dma_transfer(spi_imx, transfer);
 		if (ret != -EAGAIN)
 			return ret;
 	}
-	// spi_imx->usedma = false;
-	// printk("zty spi pio transfer!\n");
-	// return spi_imx_pio_transfer(spi, transfer);
+	spi_imx->usedma = false;
+
+	return spi_imx_pio_transfer(spi, transfer);
 	return -EAGAIN;
 }
 
@@ -1152,7 +1151,7 @@ int spi_imx_irq_dma_transfer(struct spi_device * spi, struct spi_transfer *trans
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
 	struct dma_async_tx_descriptor *desc_tx = NULL, *desc_rx = NULL;
 	int ret = 0;
-	// int left = 0;
+	int left = 0;
 	struct spi_master *master = spi_imx->bitbang.master;
 	struct sg_table *tx = &transfer->tx_sg, *rx = &transfer->rx_sg;
 
@@ -1189,9 +1188,9 @@ int spi_imx_irq_dma_transfer(struct spi_device * spi, struct spi_transfer *trans
 		 * some tail data, use PIO read to get the tail data since DMA
 		 * sometimes miss the last tail interrupt.
 		 */
-		// left = transfer->len % spi_imx->rx_wml;
-		// if (left)
-		// 	sgl_last->length = orig_length & wml_mask;
+		left = transfer->len % spi_imx->rx_wml;
+		if (left)
+			sgl_last->length = orig_length & wml_mask;
 
 		desc_rx = dmaengine_prep_slave_sg(master->dma_rx,
 					rx->sgl, rx->nents, DMA_FROM_DEVICE,
@@ -1263,7 +1262,7 @@ int spi_imx_dma_wait(struct spi_device * spi, struct spi_transfer *transfer)
 		}
 		
 	}
-	// printk("hndz dma ret is %d len %d!\n", ret, transfer->len);
+
 	spi_imx->dma_finished = 1;
 	spi_imx->devtype_data->trigger(spi_imx);
 

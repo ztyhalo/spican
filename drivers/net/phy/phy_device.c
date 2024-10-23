@@ -1253,7 +1253,7 @@ static inline void read_881_link(struct phy_device *phydev)
 	if((val >= 0) && (val &MDIO_STAT1_LSTATUS))
 	{
 		if(phydev->link ==0)
-			printk("zty find link 100!\n");
+			printk("hndz find link 100!\n");
 		phydev->link = 1;
 	}
 	else
@@ -1516,7 +1516,7 @@ static int gen10g_read_status(struct phy_device *phydev)
 	if((val >= 0) && (val &MDIO_STAT1_LSTATUS))
 	{
 		if(phydev->link ==0)
-			printk("zty find link!\n");
+			printk("hndz find link!\n");
 		phydev->link = 1;
 
 	}
