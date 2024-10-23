@@ -1859,6 +1859,15 @@ int spi_irq_process(struct spi_device * spi)
 
 				// if(priv->tx_skb)
 				// 	printk("hndz irq tx process!\n");
+				if(gIrqNoProcess == 1)
+				{
+					gRxTx_state = 1;
+					gIn_stage = 1;
+					gIrqNoProcess =0;
+					mcp251x_irq_read_2regs(spi, CANINTF);
+					return 0;
+				}
+
 				
 				mcp251x_irq_tx_process(priv);
 				// if(priv->tx_skb)
