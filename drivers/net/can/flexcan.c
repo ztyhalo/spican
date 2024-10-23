@@ -1363,7 +1363,8 @@ static int flexcan_close(struct net_device *dev)
 	struct flexcan_priv *priv = netdev_priv(dev);
 
 	netif_stop_queue(dev);
-	napi_disable(&priv->napi);
+	// napi_disable(&priv->napi);
+	napi_disable(&priv->offload.napi);
 	flexcan_chip_stop(dev);
 
 	free_irq(dev->irq, dev);
@@ -1646,7 +1647,8 @@ static int flexcan_remove(struct platform_device *pdev)
 	struct flexcan_priv *priv = netdev_priv(dev);
 
 	unregister_flexcandev(dev);
-	netif_napi_del(&priv->napi);
+	// netif_napi_del(&priv->napi);
+	netif_napi_del(&priv->offload.napi);
 	free_candev(dev);
 
 	return 0;
