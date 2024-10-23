@@ -1397,6 +1397,60 @@ spi_imx_unprepare_message(struct spi_master *master, struct spi_message *msg)
 	return 0;
 }
 
+
+static int spi_imx_rt_reg(struct spi_device *spi,struct spi_transfer *transfer)
+{
+	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
+	uint32_t i,count;
+	char* rxbuf=(char*)transfer->rx_buf;
+	char* txbuf=(char*)transfer->tx_buf;
+
+	//writel(0, spi_imx->base + MX51_ECSPI_DMA);
+	for ( i = 0; i < transfer->len; i++)
+	{
+		count = 0;
+		while((readl(spi_imx->base + MX51_ECSPI_STAT) & (1 << 0)) == 0){
+			count++;
+			if (count == 0x0F000000){
+				printk("www spi_imx_rt_reg tx timeout\n");
+				break;
+			}
+		}
+		writel(txbuf[i], spi_imx->base + MXC_CSPITXDATA);
+		
+		spi_imx->devtype_data->trigger(spi_imx);
+
+		count = 0;
+		while((readl(spi_imx->base + MX51_ECSPI_STAT) & (1 << 3)) == 0){
+			count++;
+			if (count == 0x0F000000){
+				printk("www spi_imx_rt_reg rx timeout\n");
+				break;
+			}
+		}
+		rxbuf[i] = readl(spi_imx->base + MXC_CSPIRXDATA);
+
+	}
+	return 0;
+}
+
+int spi_imx_rt(struct spi_device *spi,struct spi_message *msg,struct spi_transfer *t)
+{
+
+	spi_imx_setupxfer(spi,t);
+	spi_imx_chipselect(spi,1);
+	ndelay(100);
+	
+
+	spi_imx_rt_reg(spi,t);
+
+	ndelay(100);
+	spi_imx_chipselect(spi,0);
+	ndelay(100);
+
+	return 0;
+}
+
 static int spi_imx_probe(struct platform_device *pdev)
 {
 	struct device_node *np = pdev->dev.of_node;
@@ -1529,8 +1583,8 @@ static int spi_imx_probe(struct platform_device *pdev)
 
 	dev_info(&pdev->dev, "probed\n");
 
-	clk_disable_unprepare(spi_imx->clk_ipg);
-	clk_disable_unprepare(spi_imx->clk_per);
+	// clk_disable_unprepare(spi_imx->clk_ipg);
+	// clk_disable_unprepare(spi_imx->clk_per);
 	return ret;
 
 out_clk_put:
