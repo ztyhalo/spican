@@ -1287,12 +1287,12 @@ int spi_imx_sdma_rt_stage1(struct spi_device *spi,struct spi_message *msg, struc
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
 	msg->spi = spi;
 
-	ret = spi_imx_prepare_message(spi->master, msg);
-	if (ret) {
-		dev_err(&master->dev,
-			"failed to prepare message: %d\n", ret);
-		return ret;
-	}
+	// ret = spi_imx_prepare_message(spi->master, msg);
+	// if (ret) {
+	// 	dev_err(&master->dev,
+	// 		"failed to prepare message: %d\n", ret);
+	// 	return ret;
+	// }
 	master->cur_msg_prepared = true;
 	ret = hndz_spi_map_msg(master, msg);
 	if (ret) {
@@ -1405,7 +1405,8 @@ static int spi_imx_rt_reg(struct spi_device *spi,struct spi_transfer *transfer)
 	char* rxbuf=(char*)transfer->rx_buf;
 	char* txbuf=(char*)transfer->tx_buf;
 
-	//writel(0, spi_imx->base + MX51_ECSPI_DMA);
+	// writel(0, spi_imx->base + MX51_ECSPI_DMA);
+	spi_imx->usedma = false;
 	for ( i = 0; i < transfer->len; i++)
 	{
 		count = 0;
