@@ -1272,6 +1272,7 @@ static int mcp251x_stop(struct net_device *net)
 	struct spi_device *spi = priv->spi;
 #if MCP2515_MODE != 0
 	unsigned long flags;
+	int i = 0;
 #endif
 
 #if MCP2515_MODE == 2
@@ -1292,7 +1293,13 @@ static int mcp251x_stop(struct net_device *net)
 #if MCP2515_MODE == 0
 	mutex_lock(&priv->mcp_lock);
 #else
-	
+	while(gRxTx_state)
+	{
+		i++;
+		msleep(6);
+		if(i > 10)
+			break;		
+	}
 	spin_lock_irqsave (&priv->spin_mcp_lock, flags);
 #endif
 #if MCP2515_MODE == 2
@@ -1823,6 +1830,12 @@ static irqreturn_t mcp251x_can_irq(int irq, void *dev_id)
 	// enum can_state new_state;
 
 	spin_lock(&priv->spin_mcp_lock);
+
+	if(priv->force_quit == 1)
+	{
+		goto MCP_IRQ_END;
+	}
+
 	if(gRxTx_state == 0)
 	{
 		if(mcp251x_irq_process(priv) == 0)
@@ -2231,7 +2244,12 @@ int spi_irq_process(struct spi_device * spi)
 			case 2:
 			{
 				mcp251x_async_read_rx_nowait_frame_end(spi);
-
+				if(priv->force_quit == 1)
+				{
+					gRxTx_state = 0;
+					gIn_stage = 0;
+					return 0;
+				}
 				if (gintf & CANINTF_RX1IF) {
 					gIn_stage = 0x12;
 					mcp251x_async_read_rx_frame(spi, 1, NULL);
@@ -2249,6 +2267,12 @@ int spi_irq_process(struct spi_device * spi)
 			break;
 		}
 
+		if(priv->force_quit == 1)
+		{
+			gRxTx_state = 0;
+			gIn_stage = 0;
+			return 0;
+		}
 		if(mcp251x_irq_process(priv) == 0)
 		{
 			if (gintf & CANINTF_RX0IF) {

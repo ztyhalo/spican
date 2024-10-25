@@ -816,13 +816,6 @@ static void spi_imx_irq_dma_rx_callback(void *cookie)
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
 
 	complete(&spi_imx->dma_rx_completion);
-	// gSpiStage = 0;
-	// spi_imx->dma_finished = 1;
-	// spi_imx->devtype_data->trigger(spi_imx);
-
-	// ndelay(100);
-	// spi_imx_chipselect(spi, 0);
-	// ndelay(100);
 }
 
 

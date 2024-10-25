@@ -280,6 +280,7 @@ static dma_addr_t gdma_src = 0;							//EIM DMA发送数据的源地址		发送�
 
 static int gAxRxTx_state = 0;
 static u8 CurrImr;
+static int gAxStop = 0;
 
 static void ax88796b_get_hdr(struct net_device *ndev, struct ax_pkt_hdr *hdr, int ring_page);
 static void ax_tx_intr (struct net_device *ndev);
@@ -478,9 +479,14 @@ static void dma_m2m_rx_callback(void *data)
 	if(ndev == NULL)
 	{
 		printk("zty callback data error!\n");
+		return ;
 	}
 
-	
+	if(gAxStop == 1)
+	{
+		gAxRxTx_state = 0;
+		return ;
+	}
 
 	spin_lock_irqsave (&ax_local->page_lock, flags);
 
@@ -871,6 +877,8 @@ static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 			"net_interrupt(): irq %d for unknown device.\n", irq);
 		return IRQ_RETVAL (0);
 	}
+	if(gAxStop == 1)
+		return IRQ_RETVAL (1);
 
 	spin_lock (&ax_local->page_lock);
 	if(gAxRxTx_state == 0)
@@ -2978,7 +2986,7 @@ static int ax88796b_open (struct net_device *ndev)
 	int ret = 0;
 
 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
-
+	gAxStop = 0;
 #ifndef AX88796_SDMA_MODE
 	//   ret = request_irq (ndev->irq,&ax_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
 	   ret = request_irq (ndev->irq, &ax_dma_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
@@ -3048,21 +3056,13 @@ static int ax88796b_close (struct net_device *ndev)
 {
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	unsigned long flags;
-	void *ax_base = ax_local->membase;
+	int i = 0;
+	// void *ax_base = ax_local->membase;
+
+	gAxStop = 1;
 	printk("hndz gAxRxTx_state %d curr 0x%x!\n", gAxRxTx_state, CurrImr);
 	printk("hndz netif_queue_stopped state %d!\n", netif_queue_stopped(ndev));
 
-	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-	printk("hndz irq is 0x%x!\n",  readb (ax_base + ADDR_SHIFT16(EN0_ISR)));
-
-	printk("hndz EN0_CURPAG is 0x%x!\n", readb (ax_base + ADDR_SHIFT16(EN0_CURPAG)));
-
-	printk("hndz EN0_BOUNDARY is 0x%x!\n",readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)));
-
-	printk("hndz E8390_CMD 0x%x!\n", readb (ax_base + ADDR_SHIFT16(E8390_CMD)));
-	writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
-	printk("hndz read curr 0x%x!\n",  readb (ax_base + ADDR_SHIFT16(EN0_IMR)));
 
 
  	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
@@ -3070,25 +3070,25 @@ static int ax88796b_close (struct net_device *ndev)
 	// napi_disable(&ax_local->napi);
 	del_timer_sync (&ax_local->watchdog);
 	disable_irq (ndev->irq);
-	// printk("zty ax88796 del_timer_sync !\n");
+
+	while(gAxRxTx_state == 1)
+	{
+		i++;
+		msleep(6);
+		if(i > 10)
+			break;		
+	}
+	// dma_release_channel(dma_m2m_chan);
+	// dma_m2m_chan = NULL;
 	spin_lock_irqsave (&ax_local->page_lock, flags);
-	// printk("zty ax88796 init !\n");
+
 	ax88796b_init (ndev, 0);
-	// printk("zty ax88796 init end!\n");
-	// disable_irq (ndev->irq);
-	// printk("zty disable irq!\n");
+
 	free_irq (ndev->irq, ndev);
-	
-	// printk("zty ax88796 free_irq !\n");
-	// gsleep_mark = 1;
-	// clear_bit(NAPI_STATE_SCHED, &ax_local->napi.state);
-	// 	printk("hndz naip error!\n");
-	// napi_disable(&ax_local->napi);
-	// printk("zty ax88796 napi_disable !\n");
 	gAxRxTx_state = 0;
 	CurrImr  = 0;
    	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	// printk("zty ax88796 spin_unlock_irqrestore !\n");
+
 	netif_stop_queue (ndev);
 
 	PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
@@ -3584,7 +3584,7 @@ ax88796b_resume (struct platform_device *p_dev)
 
 	ax88796b_reset (ndev);
 	ret = ax88796b_init (ndev, 1);
-
+	gAxStop = 0;
 	spin_unlock_irqrestore (&ax_local->page_lock, flags);
 
 	if (ret == 0)
