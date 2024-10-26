@@ -1267,7 +1267,13 @@ static struct dma_async_tx_descriptor *sdma_prep_memcpy(
 	struct sdma_buffer_descriptor *bd;
 
 	if (!chan || !len || sdmac->status == DMA_IN_PROGRESS)
+	{
+		if(!chan)
+			printk("hndz chan null!\n");
+		else
+			printk("hndz len %d sdmac->status %d!\n", len, sdmac->status);
 		return NULL;
+	}
 
 	if (len >= NUM_BD * SDMA_BD_MAX_CNT) {
 		dev_err(sdma->dev, "channel%d: maximum bytes exceeded:%zu > %d\n",
@@ -1279,7 +1285,10 @@ static struct dma_async_tx_descriptor *sdma_prep_memcpy(
 		&dma_src, &dma_dst, len, channel);
 
 	if (sdma_transfer_init(sdmac, DMA_MEM_TO_MEM))
+	{
+		printk("hndz sdma_transfer_init error!\n");
 		goto err_out;
+	}
 
 	do {
 		count = min_t(size_t, len, SDMA_BD_MAX_CNT);
@@ -1289,7 +1298,11 @@ static struct dma_async_tx_descriptor *sdma_prep_memcpy(
 		bd->mode.count = count;
 
 		if (check_bd_buswidth(bd, sdmac, count, dma_dst, dma_src))
+		{
+			printk("hndz check_bd_buswidth error!\n");
 			goto err_out;
+		}
+			
 
 		dma_src += count;
 		dma_dst += count;

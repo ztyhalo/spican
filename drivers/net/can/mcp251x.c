@@ -1007,39 +1007,39 @@ static void mcp251x_hw_irq_tx_direct_stage2(struct spi_device *spi, int tx_buf_i
 }
 
 
-// static void mcp251x_irq_tx_process(struct mcp251x_priv *priv)
-// {
-// 	struct spi_device *spi = priv->spi;
-// 	struct net_device *net = priv->net;
-// 	struct can_frame *frame;
+static void mcp251x_irq_tx_process(struct mcp251x_priv *priv)
+{
+	struct spi_device *spi = priv->spi;
+	struct net_device *net = priv->net;
+	struct can_frame *frame;
 
 	
 
-// 	if (priv->tx_skb) {
+	if (priv->tx_skb) {
 		
-// 		if (priv->can.state == CAN_STATE_BUS_OFF) {
-// 			mcp251x_clean(net);
-// 		} else {
-// 			gmcpUse = 1;
-// 			gRxTx_state = 2;
-// 			frame = (struct can_frame *)priv->tx_skb->data;
+		if (priv->can.state == CAN_STATE_BUS_OFF) {
+			mcp251x_clean(net);
+		} else {
+			gmcpUse = 1;
+			gRxTx_state = 2;
+			frame = (struct can_frame *)priv->tx_skb->data;
 
-// 			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
-// 				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
-// 			// printk("hndz send is 0x%x!\n", frame->can_id);
-// 			mcp251x_hw_irq_tx(spi, frame, 0);
-// 			priv->tx_len = 1 + frame->can_dlc;
-// 			can_put_echo_skb(priv->tx_skb, net, 0);
-// 			// priv->tx_skb = NULL;
-// 		}
-// 	}
-// 	else
-// 	{
-// 		if(gTxStop == 1)
-// 			printk("hndz gTx error!\n");
-// 	}
+			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
+				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
+			// printk("hndz send is 0x%x!\n", frame->can_id);
+			mcp251x_hw_irq_tx(spi, frame, 0);
+			priv->tx_len = 1 + frame->can_dlc;
+			can_put_echo_skb(priv->tx_skb, net, 0);
+			// priv->tx_skb = NULL;
+		}
+	}
+	else
+	{
+		if(gTxStop == 1)
+			printk("hndz gTx error!\n");
+	}
 
-// }
+}
 
 static netdev_tx_t mcp251x_hard_start_xmit(struct sk_buff *skb,
 					   struct net_device *net)
@@ -1069,7 +1069,7 @@ static netdev_tx_t mcp251x_hard_start_xmit(struct sk_buff *skb,
 	
 	if(gRxTx_state != 0)
 	{
-		// printk("hndz spi is using %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
+		printk("hndz spi is using %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
 		return NETDEV_TX_OK;
 	}
@@ -1810,6 +1810,7 @@ static int mcp251x_irq_process(struct mcp251x_priv *priv)
 				priv->tx_len = 0;
 			}
 			priv->tx_skb = NULL;
+			gTxStop = 0;
 			netif_wake_queue(net);
 		}
 
@@ -2267,6 +2268,8 @@ int spi_irq_process(struct spi_device * spi)
 			break;
 		}
 
+		
+
 		if(priv->force_quit == 1)
 		{
 			gRxTx_state = 0;
@@ -2293,6 +2296,7 @@ int spi_irq_process(struct spi_device * spi)
 
 			gRxTx_state = 0;
 			gIn_stage = 0;
+			mcp251x_irq_tx_process(priv);
 		}	
 
 	}
