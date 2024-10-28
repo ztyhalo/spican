@@ -1225,30 +1225,9 @@ static inline void read_881_link(struct phy_device *phydev)
 {
 	int val;
 
-//	zty_c45_write(phydev, 0x07, 0x0200, 0x0200);
 
-//	zty_c45_write(phydev, 0x07, 0x0200, 0x0200);
-
-//	mdiobus_c45_write(phydev->bus, phydev->addr, 7, 0x0200, 0x0200);
-
-	// val = mdiobus_c45_read(phydev->bus, phydev->addr, 7, 0x0200);
-	// printk("zty read 0x0200 state 0x%x!\n", val);
-
-
-//	val = mdiobus_c45_read(phydev->bus, phydev->addr, 7, 0x0201);
-	//printk("zty read 0x0201 state 0x%x!\n", val);
-
-	// if(val & (0x01 << 5))
-	// {
-	// 	printk("zty auto end!\n");
-	// }
-	// else
-	// 	return ;
-
-	// val = mdiobus_c45_read(phydev->bus, phydev->addr, 1, 0x8007);
-	// printk("zty read 8007 state 0x%x!\n", val);
 	val = mdiobus_c45_read(phydev->bus, phydev->addr, 1, 1);
-//	printk("zty read link state 0x%x!\n", val);
+
 
 	if((val >= 0) && (val &MDIO_STAT1_LSTATUS))
 	{
@@ -1259,81 +1238,7 @@ static inline void read_881_link(struct phy_device *phydev)
 	else
 	{
 		phydev->link = 0;
-	}
-	
-// 	else
-// 	{
-// //		printk("zty find link down!\n");
-// 		phydev->link = 0;
-
-// 		val = mdiobus_c45_read(phydev->bus, phydev->addr, 1, 0x0901);
-// //		printk("zty read 1000 link state 0x%x!\n", val);
-
-// 		if((val >= 0) && (val &0x01))
-// 		{
-// 			phydev->link = 1;
-// 			//printk("zty find link 1000!\n");
-// 		}
-// 		else
-// 			phydev->link = 0;
-
-// 		val = mdiobus_c45_read(phydev->bus, phydev->addr, 7, 0x0201);
-
-// 		if((val >= 0) && (val &MDIO_STAT1_LSTATUS))
-// 		{
-// 			phydev->link = 1;
-// 			printk("zty find link 1000!\n");
-// 		}
-// 		else
-// 			phydev->link = 0;
-
-// 	//	val = mdiobus_c45_read(phydev->bus, phydev->addr, MDIO_MMD_AN, 0x0201);
-
-// //			printk("zty read mdio stat1 0x%x!\n", val);
-
-// //			if(val < 0)
-// //				return val;
-// //			if (val & MDIO_AN_STAT1_ABLE)
-// //			{
-// //				printk("zty phy support autoneg!\n");
-// //				phydev->supported = SUPPORTED_Autoneg;
-// //				//autoneg = 1;
-// //			}
-
-// 		//	val = mdiobus_c45_read(phydev->bus, phydev->addr, 0x1, 0x0834);
-
-// //			printk("zty read 834 val 0x%x!\n", val);
-// 	}
-
-		// int bmcr = mdiobus_c45_read(phydev->bus, phydev->addr, 1, 0);
-
-		// if (bmcr < 0)
-		// {
-		// 	printk("zty read 1 0 err!\n");
-		// 	return bmcr;
-		// }
-
-
-
-		// if((bmcr & (1 << 6)) && !(bmcr & (1 <<13)))
-		// {
-		// 	printk("zty link speed 1000!\n");
-		// 	phydev->duplex = DUPLEX_FULL;
-		// 	phydev->speed = SPEED_1000;
-		// }
-		// else if(!(bmcr & (1 << 6)) && (bmcr & (1 <<13)))
-		// {
-		// 	printk("zty control speed 100!\n");
-		// 	phydev->duplex = DUPLEX_FULL;
-		// 	phydev->speed = SPEED_100;
-		// }
-		// else
-		// {
-		// 	printk("zty control speed error!\n");
-		// }
-
-	//	bmcr = mdiobus_c45_read(phydev->bus, phydev->addr, 3, 0);
-	//	printk("zty read 3 0 val 0x%x!\n", bmcr);
+	}	
 }
 /**
  * genphy_update_link - update link status in @phydev

@@ -35,121 +35,7 @@ static inline int zty_c45_write(struct phy_device *dev, int devad, int reg, int 
 {
 	return mdiobus_c45_write(dev->bus, dev->addr, devad, reg, val);
 }
-// static int rtlphy_config_init(struct phy_device *phydev)
-// {
-//      int val;
 
-//      val = phy_read(phydev, 3);
-//      netdev_info(phydev->attached_dev, "rtlphy_config_init done for phy id 0x%x.\n", val);
-//      return 0;
-//  }
-
-
-// static int rtl821x_ack_interrupt(struct phy_device *phydev)
-// {
-// 	int err;
-
-// 	err = phy_read(phydev, RTL821x_INSR);
-
-// 	return (err < 0) ? err : 0;
-// }
-
-// static int rtl8211b_config_intr(struct phy_device *phydev)
-// {
-// 	int err;
-
-// 	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
-// 		err = phy_write(phydev, RTL821x_INER,
-// 				RTL821x_INER_INIT);
-// 	else
-// 		err = phy_write(phydev, RTL821x_INER, 0);
-
-// 	return err;
-// }
-
-// static int rtl8211e_config_intr(struct phy_device *phydev)
-// {
-// 	int err;
-
-// 	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
-// 		err = phy_write(phydev, RTL821x_INER,
-// 				RTL8211E_INER_LINK_STATUS);
-// 	else
-// 		err = phy_write(phydev, RTL821x_INER, 0);
-
-// 	return err;
-// }
-
-// static int rtl8211f_ack_interrupt(struct phy_device *phydev)
-// {
-// 	int err;
-
-// 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0xa43);
-// 	err = phy_read(phydev, RTL8211F_INSR);
-// 	/* restore to default page 0 */
-// 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0x0);
-
-// 	return (err < 0) ? err : 0;
-// }
-
-// static int rtl8211f_config_intr(struct phy_device *phydev)
-// {
-// 	int err;
-
-// 	if (phydev->interrupts == PHY_INTERRUPT_ENABLED)
-// 		err = phy_write(phydev, RTL821x_INER,
-// 				RTL8211F_INER_LINK_STATUS);
-// 	else
-// 		err = phy_write(phydev, RTL821x_INER, 0);
-
-// 	return err;
-// }
-
-// static int rtl8211f_config_init(struct phy_device *phydev)
-// {
-// 	int ret;
-// 	u16 reg;
-
-// 	ret = rtlphy_config_init(phydev);
-// 	if (ret < 0)
-// 		return ret;
-
-// 	//1000m led green
-// 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0xd04);
-// 	phy_write(phydev, 0x10, 0x6359);
-// 	/* restore to default page 0 */
-// 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0x0);
-
-
-
-// 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0xd08);
-// 	reg = phy_read(phydev, 0x11);
-
-// 	/* enable TX-delay for rgmii-id and rgmii-txid, otherwise disable it */
-// 	if (phydev->interface == PHY_INTERFACE_MODE_RGMII_ID ||
-// 	    phydev->interface == PHY_INTERFACE_MODE_RGMII_TXID)
-// 		reg |= RTL8211F_TX_DELAY;
-// 	else
-// 		reg &= ~RTL8211F_TX_DELAY;
-
-// 	phy_write(phydev, 0x11, reg);
-
-// 	//tx delay enable
-// 	phy_write(phydev, 0x11, 0x109);
-// 	reg = phy_read(phydev,0x11);
-// 	pr_err("ydx page 0xd08 register 0x11 is 0x%x\n",reg);
-
-// 	//rx delay enable
-// 	phy_write(phydev, 0x15, 0x19);
-// 	reg = phy_read(phydev,0x15);
-// 	pr_err("ydx page 0xd08 register 0x15 is 0x%x\n",reg);
-// 	/* restore to default page 0 */
-// 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0x0);
-
-
-
-// 	return 0;
-// }
 
 static int bcm89881_config_init(struct phy_device *phydev)
 {
@@ -756,24 +642,6 @@ static int bcm89881_read_status(struct phy_device *phydev)
 	int common_adv_gb = 0;
 //	u32 mmd_mask = phydev->c45_ids.devices_in_package;
 
-//	phydev->link = 1;
-//
-//	/* For now just lie and say it's 10G all the time */
-//	phydev->speed = SPEED_10000;
-//	phydev->duplex = DUPLEX_FULL;
-//
-//	for (devad = 0; mmd_mask; devad++, mmd_mask = mmd_mask >> 1) {
-//		if (!(mmd_mask & 1))
-//			continue;
-//
-//		/* Read twice because link state is latched and a
-//		 * read moves the current state into the register
-//		 */
-//		phy_read_mmd(phydev, devad, MDIO_STAT1);
-//		reg = phy_read_mmd(phydev, devad, MDIO_STAT1);
-//		if (reg < 0 || !(reg & MDIO_STAT1_LSTATUS))
-//			phydev->link = 0;
-//	}
 
 	val = mdiobus_c45_read(phydev->bus, phydev->addr, 1, 1);
 //	printk("zty read link state 0x%x!\n", val);
