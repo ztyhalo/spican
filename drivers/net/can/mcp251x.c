@@ -1873,18 +1873,18 @@ MCP_IRQ_END:
 
 
 
-static void mcp251x_irq_write_bits(struct spi_device *spi, u8 reg,
-			       u8 mask, uint8_t val)
-{
-	struct mcp251x_priv *priv = spi_get_drvdata(spi);
+// static void mcp251x_irq_write_bits(struct spi_device *spi, u8 reg,
+// 			       u8 mask, uint8_t val)
+// {
+// 	struct mcp251x_priv *priv = spi_get_drvdata(spi);
 
-	priv->spi_tx_buf[0] = INSTRUCTION_BIT_MODIFY;
-	priv->spi_tx_buf[1] = reg;
-	priv->spi_tx_buf[2] = mask;
-	priv->spi_tx_buf[3] = val;
+// 	priv->spi_tx_buf[0] = INSTRUCTION_BIT_MODIFY;
+// 	priv->spi_tx_buf[1] = reg;
+// 	priv->spi_tx_buf[2] = mask;
+// 	priv->spi_tx_buf[3] = val;
 
-	mcp251x_spi_async_trans(spi, 4);
-}
+// 	mcp251x_spi_async_trans(spi, 4);
+// }
 
 
 // static void mcp251x_irq_read_2regs(struct spi_device *spi, uint8_t reg)
@@ -1899,111 +1899,111 @@ static void mcp251x_irq_write_bits(struct spi_device *spi, u8 reg,
 
 // }
 
-int mcp251x_clear_process(struct spi_device * spi)
-{
+// int mcp251x_clear_process(struct spi_device * spi)
+// {
 
 
 
-	u8 clear_intf = 0;
+// 	u8 clear_intf = 0;
 
-	if (gintf & (CANINTF_ERR | CANINTF_TX))
-		clear_intf |= gintf & (CANINTF_ERR | CANINTF_TX);
-	if (clear_intf)
-	{
-		mcp251x_irq_write_bits(spi, CANINTF, clear_intf, 0x00);	
-		return 1;	
-	}
-	return 0;
-}
+// 	if (gintf & (CANINTF_ERR | CANINTF_TX))
+// 		clear_intf |= gintf & (CANINTF_ERR | CANINTF_TX);
+// 	if (clear_intf)
+// 	{
+// 		mcp251x_irq_write_bits(spi, CANINTF, clear_intf, 0x00);	
+// 		return 1;	
+// 	}
+// 	return 0;
+// }
 
-int mcp251x_gerror_process(struct spi_device * spi)
-{
-	if (geflag)
-	{
-		mcp251x_irq_write_bits(spi, EFLG, geflag, 0x00);
-		return 1;
-	}
-	return 0;
-}
-
-
-int mcp251x_error_process(struct spi_device * spi)
-{
-	struct mcp251x_priv *priv = spi_get_drvdata(spi);
-	struct net_device *net = priv->net;
+// int mcp251x_gerror_process(struct spi_device * spi)
+// {
+// 	if (geflag)
+// 	{
+// 		mcp251x_irq_write_bits(spi, EFLG, geflag, 0x00);
+// 		return 1;
+// 	}
+// 	return 0;
+// }
 
 
-	int can_id = 0, data1 = 0;
-	enum can_state new_state;
+// int mcp251x_error_process(struct spi_device * spi)
+// {
+// 	struct mcp251x_priv *priv = spi_get_drvdata(spi);
+// 	struct net_device *net = priv->net;
 
-	/* Update can state */
-	if (geflag & EFLG_TXBO) {
-		new_state = CAN_STATE_BUS_OFF;
-		can_id |= CAN_ERR_BUSOFF;
-	} else if (geflag & EFLG_TXEP) {
-		new_state = CAN_STATE_ERROR_PASSIVE;
-		can_id |= CAN_ERR_CRTL;
-		data1 |= CAN_ERR_CRTL_TX_PASSIVE;
-	} else if (geflag & EFLG_RXEP) {
-		new_state = CAN_STATE_ERROR_PASSIVE;
-		can_id |= CAN_ERR_CRTL;
-		data1 |= CAN_ERR_CRTL_RX_PASSIVE;
-	} else if (geflag & EFLG_TXWAR) {
-		new_state = CAN_STATE_ERROR_WARNING;
-		can_id |= CAN_ERR_CRTL;
-		data1 |= CAN_ERR_CRTL_TX_WARNING;
-	} else if (geflag & EFLG_RXWAR) {
-		new_state = CAN_STATE_ERROR_WARNING;
-		can_id |= CAN_ERR_CRTL;
-		data1 |= CAN_ERR_CRTL_RX_WARNING;
-	} else {
-		new_state = CAN_STATE_ERROR_ACTIVE;
-	}
 
-	/* Update can state statistics */
-	switch (priv->can.state) {
-	case CAN_STATE_ERROR_ACTIVE:
-		if (new_state >= CAN_STATE_ERROR_WARNING &&
-			new_state <= CAN_STATE_BUS_OFF)
-			priv->can.can_stats.error_warning++;
-	case CAN_STATE_ERROR_WARNING:	/* fallthrough */
-		if (new_state >= CAN_STATE_ERROR_PASSIVE &&
-			new_state <= CAN_STATE_BUS_OFF)
-			priv->can.can_stats.error_passive++;
-		break;
-	default:
-		break;
-	}
-	priv->can.state = new_state;
+// 	int can_id = 0, data1 = 0;
+// 	enum can_state new_state;
 
-	if (gintf & CANINTF_ERRIF) {
-		/* Handle overflow counters */
-		if (geflag & (EFLG_RX0OVR | EFLG_RX1OVR)) {
-			if (geflag & EFLG_RX0OVR) {
-				net->stats.rx_over_errors++;
-				net->stats.rx_errors++;
-			}
-			if (geflag & EFLG_RX1OVR) {
-				net->stats.rx_over_errors++;
-				net->stats.rx_errors++;
-			}
-			can_id |= CAN_ERR_CRTL;
-			data1 |= CAN_ERR_CRTL_RX_OVERFLOW;
-		}
-		mcp251x_error_skb(net, can_id, data1);
-	}
+// 	/* Update can state */
+// 	if (geflag & EFLG_TXBO) {
+// 		new_state = CAN_STATE_BUS_OFF;
+// 		can_id |= CAN_ERR_BUSOFF;
+// 	} else if (geflag & EFLG_TXEP) {
+// 		new_state = CAN_STATE_ERROR_PASSIVE;
+// 		can_id |= CAN_ERR_CRTL;
+// 		data1 |= CAN_ERR_CRTL_TX_PASSIVE;
+// 	} else if (geflag & EFLG_RXEP) {
+// 		new_state = CAN_STATE_ERROR_PASSIVE;
+// 		can_id |= CAN_ERR_CRTL;
+// 		data1 |= CAN_ERR_CRTL_RX_PASSIVE;
+// 	} else if (geflag & EFLG_TXWAR) {
+// 		new_state = CAN_STATE_ERROR_WARNING;
+// 		can_id |= CAN_ERR_CRTL;
+// 		data1 |= CAN_ERR_CRTL_TX_WARNING;
+// 	} else if (geflag & EFLG_RXWAR) {
+// 		new_state = CAN_STATE_ERROR_WARNING;
+// 		can_id |= CAN_ERR_CRTL;
+// 		data1 |= CAN_ERR_CRTL_RX_WARNING;
+// 	} else {
+// 		new_state = CAN_STATE_ERROR_ACTIVE;
+// 	}
 
-	if (priv->can.state == CAN_STATE_BUS_OFF) {
-		if (priv->can.restart_ms == 0) {
-			priv->force_quit = 1;
-			priv->can.can_stats.bus_off++;
-			can_bus_off(net);
-			mcp251x_hw_sleep(spi);
-		}
-	}
-	return 0;
+// 	/* Update can state statistics */
+// 	switch (priv->can.state) {
+// 	case CAN_STATE_ERROR_ACTIVE:
+// 		if (new_state >= CAN_STATE_ERROR_WARNING &&
+// 			new_state <= CAN_STATE_BUS_OFF)
+// 			priv->can.can_stats.error_warning++;
+// 	case CAN_STATE_ERROR_WARNING:	/* fallthrough */
+// 		if (new_state >= CAN_STATE_ERROR_PASSIVE &&
+// 			new_state <= CAN_STATE_BUS_OFF)
+// 			priv->can.can_stats.error_passive++;
+// 		break;
+// 	default:
+// 		break;
+// 	}
+// 	priv->can.state = new_state;
 
-}
+// 	if (gintf & CANINTF_ERRIF) {
+// 		/* Handle overflow counters */
+// 		if (geflag & (EFLG_RX0OVR | EFLG_RX1OVR)) {
+// 			if (geflag & EFLG_RX0OVR) {
+// 				net->stats.rx_over_errors++;
+// 				net->stats.rx_errors++;
+// 			}
+// 			if (geflag & EFLG_RX1OVR) {
+// 				net->stats.rx_over_errors++;
+// 				net->stats.rx_errors++;
+// 			}
+// 			can_id |= CAN_ERR_CRTL;
+// 			data1 |= CAN_ERR_CRTL_RX_OVERFLOW;
+// 		}
+// 		mcp251x_error_skb(net, can_id, data1);
+// 	}
+
+// 	if (priv->can.state == CAN_STATE_BUS_OFF) {
+// 		if (priv->can.restart_ms == 0) {
+// 			priv->force_quit = 1;
+// 			priv->can.can_stats.bus_off++;
+// 			can_bus_off(net);
+// 			mcp251x_hw_sleep(spi);
+// 		}
+// 	}
+// 	return 0;
+
+// }
 
 // int spi_irq_process(struct spi_device * spi)
 // {
