@@ -383,93 +383,93 @@ static int eim_sdma_init(void * para)
 	return req_sdma_channel();
 }
 
-// static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *ndev)
-// {
-// 	struct ax_device *ax_local = ax_get_priv (ndev);
-// 	void *ax_base = ax_local->membase;
-// 	int send_length;
+static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *ndev)
+{
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+	int send_length;
 
-// 	u8 ctepr=0, free_pages=0, need_pages;
+	u8 ctepr=0, free_pages=0, need_pages;
 
-// 	send_length = skb->len;
+	send_length = skb->len;
 
-// 	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
+	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
 
-// 	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-// 	ax_local->irqlock = 1;
+	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+	ax_local->irqlock = 1;
 
-// 	need_pages = ((send_length - 1) >> 8) + 1;
+	need_pages = ((send_length - 1) >> 8) + 1;
 
-// 	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
+	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
 
-// 	if (ctepr & ENCTEPR_TXCQF) {
-// 		free_pages = 0;
-// 	} else if (ctepr == 0) {
+	if (ctepr & ENCTEPR_TXCQF) {
+		free_pages = 0;
+	} else if (ctepr == 0) {
 
-// 		/*
-// 		 * If someone issues STOP bit of command register at run time,
-// 		 * the TX machine will stop the current transmission and the
-// 		 * CTEPR register will be reset to zero.
-// 		 * This is just precautionary measures.
-// 		 */
-// 		if (ax_local->tx_prev_ctepr != 0) {
-// 			ax_local->tx_curr_page = ax_local->tx_start_page;
-// 			ax_local->tx_prev_ctepr = 0;
-// 		}
+		/*
+		 * If someone issues STOP bit of command register at run time,
+		 * the TX machine will stop the current transmission and the
+		 * CTEPR register will be reset to zero.
+		 * This is just precautionary measures.
+		 */
+		if (ax_local->tx_prev_ctepr != 0) {
+			ax_local->tx_curr_page = ax_local->tx_start_page;
+			ax_local->tx_prev_ctepr = 0;
+		}
 
-// 		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
-// 	}
-// 	else if (ctepr < ax_local->tx_curr_page - 1) {
-// 		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
-// 					ctepr - ax_local->tx_start_page + 1;
-// 	}
-// 	else if (ctepr > ax_local->tx_curr_page - 1) {
-// 		free_pages = ctepr + 1 - ax_local->tx_curr_page;
-// 	}
-// 	else if (ctepr == ax_local->tx_curr_page - 1) {
-// 		if (ax_local->tx_full)
-// 			free_pages = 0;
-// 		else
-// 			free_pages = TX_PAGES;
-// 	}
+		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
+	}
+	else if (ctepr < ax_local->tx_curr_page - 1) {
+		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
+					ctepr - ax_local->tx_start_page + 1;
+	}
+	else if (ctepr > ax_local->tx_curr_page - 1) {
+		free_pages = ctepr + 1 - ax_local->tx_curr_page;
+	}
+	else if (ctepr == ax_local->tx_curr_page - 1) {
+		if (ax_local->tx_full)
+			free_pages = 0;
+		else
+			free_pages = TX_PAGES;
+	}
 
 
-// 	if (free_pages < need_pages) {
-// 		printk("hndz process free_pages < need_pages\n");
-// 		netif_stop_queue (ndev);
-// 		ax_local->tx_full = 1;
-// 		ax_local->irqlock = 0;
-// 		ax_local->tx_skb = NULL;	
-// 		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-// 		return NETDEV_TX_BUSY;
-// 	}
-// 	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
-// 	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-// 	if (free_pages == need_pages) {
-// 		netif_stop_queue (ndev);
-// 		ax_local->tx_full = 1;
-// 	}
-// 	ax_local->tx_prev_ctepr = ctepr;
-// 	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-// 		ax_local->tx_stop_page) ? 
-// 		(ax_local->tx_curr_page + need_pages) : 
-// 		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-// 		 + ax_local->tx_start_page);
+	if (free_pages < need_pages) {
+		printk("hndz process free_pages < need_pages\n");
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+		ax_local->irqlock = 0;
+		ax_local->tx_skb = NULL;	
+		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+		return NETDEV_TX_BUSY;
+	}
+	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
+	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+	if (free_pages == need_pages) {
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+	}
+	ax_local->tx_prev_ctepr = ctepr;
+	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+		ax_local->tx_stop_page) ? 
+		(ax_local->tx_curr_page + need_pages) : 
+		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+		 + ax_local->tx_start_page);
 
-// 	ax_local->irqlock = 0;	
-// 	ax_local->tx_skb = NULL;
+	ax_local->irqlock = 0;	
 
-// 	gAxRxTx_state = 2;
-// 	CurrImr = ENISR_TX;
-// 	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
+
+	gAxRxTx_state = 2;
+	CurrImr = ENISR_TX;
+	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
 	
 
-// 	dev_kfree_skb (skb);
+	// dev_kfree_skb (skb);
 
-// 	ndev->trans_start = jiffies;
-// 	ax_local->stat.tx_bytes += send_length;
-// 	return 0;
-// }
+	// ndev->trans_start = jiffies;
+	// ax_local->stat.tx_bytes += send_length;
+	return 0;
+}
 
 static int ax88796b_dma_send_data_process (struct sk_buff *skb, struct net_device *ndev)
 {
@@ -553,6 +553,7 @@ static void dma_m2m_rx_callback(void *data)
 	int pkt_len = eim_rx_length;
 
 	struct sk_buff *skb;
+	struct sk_buff *txskb;
 	int status;
 
 	void *ax_base = ax_local->membase;
@@ -663,9 +664,23 @@ static void dma_m2m_rx_callback(void *data)
 	{
 		if(ax_local->tx_skb != NULL)
 		{
-			
-			// status = ax88796b_send_data_process(ax_local->tx_skb, ndev);
-			status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
+			if(skb->len > 64)
+				status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
+			else
+			{
+			 	status = ax88796b_send_data_process(ax_local->tx_skb, ndev);
+				if(status != 0)
+					printk("hndz call send ret is 0x%x!\n", status);
+				txskb = ax_local->tx_skb;
+				ax_local->tx_skb = NULL;
+				spin_unlock_irqrestore (&ax_local->page_lock, flags);
+				dev_kfree_skb (txskb);
+
+				ndev->trans_start = jiffies;
+				ax_local->stat.tx_bytes += skb->len ;
+				return ;
+			}
+			// status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
 			
 			if(status != 0)
 				printk("hndz call send ret is 0x%x!\n", status);
@@ -1206,36 +1221,46 @@ static int ax88796b_eim_dma_start_xmit (struct sk_buff *skb, struct net_device *
 		return NETDEV_TX_BUSY;
 	}
 
-	eim_sdma_tx_start (ndev, send_length, skb->data, ax_local->tx_curr_page);
-	gctepr= ctepr;
-	gfree_pages = free_pages;
-	gneed_pages = need_pages;
+	if(send_length > 64)
+	{
+		eim_sdma_tx_start (ndev, send_length, skb->data, ax_local->tx_curr_page);
+		gctepr= ctepr;
+		gfree_pages = free_pages;
+		gneed_pages = need_pages;
+		spin_unlock_irqrestore (&ax_local->page_lock, flags);
+	}
+	else
+	{
+		//  gtime1 = hndz_read_current_timer();
+		ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
+		ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+		if (free_pages == need_pages) {
+			netif_stop_queue (ndev);
+			ax_local->tx_full = 1;
+		}
+		ax_local->tx_prev_ctepr = ctepr;
+		ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+			ax_local->tx_stop_page) ? 
+			(ax_local->tx_curr_page + need_pages) : 
+			(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+			+ ax_local->tx_start_page);
 
-	// ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-	// if (free_pages == need_pages) {
-	// 	netif_stop_queue (ndev);
-	// 	ax_local->tx_full = 1;
-	// }
-	// ax_local->tx_prev_ctepr = ctepr;
-	// ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-	// 	ax_local->tx_stop_page) ? 
-	// 	(ax_local->tx_curr_page + need_pages) : 
-	// 	(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-	// 	 + ax_local->tx_start_page);
+		ax_local->irqlock = 0;	
+		ax_local->tx_skb = NULL;
 
-	// ax_local->irqlock = 0;	
-	// ax_local->tx_skb = NULL;
+		gAxRxTx_state = 2;
+		CurrImr = ENISR_TX;
+		writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
+		spin_unlock_irqrestore (&ax_local->page_lock, flags);
+		//  gtime2 = hndz_read_current_timer();
+		dev_kfree_skb (skb);
 
-	// gAxRxTx_state = 2;
-	// CurrImr = ENISR_TX;
-	// writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
-
-	// 	dev_kfree_skb (skb);
-
-	// ndev->trans_start = jiffies;
-	// ax_local->stat.tx_bytes += send_length;
+		ndev->trans_start = jiffies;
+		ax_local->stat.tx_bytes += send_length;
+		// printk("hndz tx %lu!\n", gtime2 - gtime1);
+	}
 	
-	spin_unlock_irqrestore (&ax_local->page_lock, flags);
+	
 
 
 
@@ -1841,23 +1866,23 @@ static int ax88796b_send_data (struct net_device *ndev)
 	}
 
 	// ax_block_dma_output(ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	//  ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	printk("hndz ax_local->tx_curr_page %d!\n", ax_local->tx_curr_page);
-	eim_sdma_tx_start (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	// ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-	// if (free_pages == need_pages) {
-	// 	netif_stop_queue (ndev);
-	// 	ax_local->tx_full = 1;
-	// }
-	// ax_local->tx_prev_ctepr = ctepr;
-	// ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-	// 	ax_local->tx_stop_page) ? 
-	// 	(ax_local->tx_curr_page + need_pages) : 
-	// 	(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-	// 	 + ax_local->tx_start_page);
+	ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	// printk("hndz ax_local->tx_curr_page %d!\n", ax_local->tx_curr_page);
+	// eim_sdma_tx_start (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
+	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+	if (free_pages == need_pages) {
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+	}
+	ax_local->tx_prev_ctepr = ctepr;
+	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+		ax_local->tx_stop_page) ? 
+		(ax_local->tx_curr_page + need_pages) : 
+		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+		 + ax_local->tx_start_page);
 
-	// ax_local->irqlock = 0;	
-	// writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+	ax_local->irqlock = 0;	
+	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 
 	 spin_unlock_irqrestore (&ax_local->page_lock, flags);
 
@@ -2894,12 +2919,11 @@ ax_block_output (struct net_device *ndev, int count,
 		u16 i;
 		for (i = 0; i < count; i += 2)
 			WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
-		//for (i = 0; i < count -2; i += 2) {
-		//	// WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
-		//	//  *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
-		//	 zWRITE_FIFO(ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
-		//}
-		//WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
+		// for (i = 0; i < count -2; i += 2) {
+
+		// 	 zWRITE_FIFO(ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
+		// }
+		// WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
 	}
 #endif
 
