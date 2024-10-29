@@ -1553,7 +1553,7 @@ gckHARDWARE_InitializeHardware(
                                   data));
     }
 
-    if (_IsHardwareMatch(Hardware, gcv4000, 0x5222))
+    if (_IsHardwareMatch(Hardware, gcv4000, 0x5222) || _IsHardwareMatch(Hardware, gcv2000, 0x5108))
     {
         if (regPMC == 0)
         {
