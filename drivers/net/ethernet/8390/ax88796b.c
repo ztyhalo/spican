@@ -104,6 +104,7 @@ static u8 gctepr=0, gfree_pages=0, gneed_pages =0;
 
 static struct boardcast_info sbcast_info;
 
+#define AX88796_WIGH  8
 
 
 module_param (mem, int, 0);
@@ -591,11 +592,12 @@ static void dma_m2m_rx_callback(void *data)
 	// dma_unmap_single(NULL, dma_dst, 2048, DMA_DEV_TO_MEM);
 	skb->protocol = eth_type_trans (skb,ndev);
 
-	status = netif_rx_ni(skb);
-	if (status != NET_RX_SUCCESS)
-	{
-		printk("hndz ax recv error status 0x%x!\n", status);
-	}
+	skb_queue_tail(&ax_local->skb_queue, skb);
+	// status = netif_rx_ni(skb);
+	// if (status != NET_RX_SUCCESS)
+	// {
+	// 	printk("hndz ax recv error status 0x%x!\n", status);
+	// }
 
 	ndev->last_rx = jiffies;
 	ax_local->stat.rx_packets++;
@@ -636,6 +638,7 @@ static void dma_m2m_rx_callback(void *data)
 
 			CurrImr = ENISR_ALL;
 			writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+			
 		}
 		else
 		{
@@ -662,6 +665,7 @@ static void dma_m2m_rx_callback(void *data)
 
 	if(i == 0)
 	{
+		napi_schedule(&ax_local->napi);
 		if(ax_local->tx_skb != NULL)
 		{
 			if(skb->len > 64)
@@ -2766,7 +2770,7 @@ ax88796b_get_hdr (struct net_device *ndev,
  * Purpose:
  * ----------------------------------------------------------------------------
  */
-
+#if 0
 static void 
 ax88796b_block_input (struct net_device *ndev, int count,
 			struct sk_buff *skb, int ring_offset)
@@ -2857,7 +2861,7 @@ ax88796b_block_input (struct net_device *ndev, int count,
 	// }
 	ax_local->dmaing = 0;
 }
-
+#endif
 /*
  * ----------------------------------------------------------------------------
  * Function Name: ax_trigger_send
@@ -3131,6 +3135,7 @@ static void ax_tx_err (struct net_device *ndev)
 		if (txsr & ENTSR_OWC) ax_local->stat.tx_window_errors++;
 	}
 }
+#if 0
 static int ax88796b_rx_poll(struct net_device *ndev, struct ax_device *ax_local,
 		      int budget)
 {
@@ -3287,6 +3292,35 @@ static int ax88796b_poll(struct napi_struct *napi, int budget)
 
 	return work_done;
 }
+#endif
+static int ax88796b_dma_poll(struct napi_struct *napi, int quota)
+{
+	struct ax_device *ax_local = container_of(napi, struct ax_device, napi);
+
+
+	int work_done;
+
+	struct sk_buff *skb;
+	work_done = 0;
+	//PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
+	while ((work_done < quota) &&
+	       (skb = skb_dequeue(&ax_local->skb_queue))) {
+
+		work_done++;
+		netif_receive_skb(skb);
+	}
+
+	if (work_done < quota) {
+
+		napi_complete(napi);
+
+		/* Check if there was another interrupt */
+		if (!skb_queue_empty(&ax_local->skb_queue))
+			napi_reschedule(&ax_local->napi);
+	}
+
+	return work_done;
+}
 
 /*
  * ----------------------------------------------------------------------------
@@ -3396,6 +3430,7 @@ static int ax88796b_open (struct net_device *ndev)
 
 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
 	gAxStop = 0;
+	skb_queue_head_init(&ax_local->skb_queue);
 #ifndef AX88796_SDMA_MODE
 	//   ret = request_irq (ndev->irq,&ax_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
 	   ret = request_irq (ndev->irq, &ax_dma_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
@@ -3447,7 +3482,7 @@ static int ax88796b_open (struct net_device *ndev)
 	add_timer (&ax_local->watchdog);
 #endif
 
-	//  napi_enable(&ax_local->napi);
+	  napi_enable(&ax_local->napi);
 
 	PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
 
@@ -3476,7 +3511,7 @@ static int ax88796b_close (struct net_device *ndev)
 
  	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
 
-	// napi_disable(&ax_local->napi);
+	 napi_disable(&ax_local->napi);
 	del_timer_sync (&ax_local->watchdog);
 	disable_irq (ndev->irq);
 
@@ -3599,19 +3634,20 @@ static int ax_probe (struct net_device *ndev, struct ax_device *ax_local)
 	ax_local->stop_page = NESM_STOP_PG;
 	ax_local->media = media;
 
-	if (weight == 0) {
-#ifndef AX88796_SDMA_MODE
-		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, 4);
-#else
-		netif_napi_add(ndev, &ax_local->napi, ax88796b_sdma_poll, 4);
-#endif
+// 	if (weight == 0) {
+// #ifndef AX88796_SDMA_MODE
+// 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, 4);
+// #else
+// 		netif_napi_add(ndev, &ax_local->napi, ax88796b_sdma_poll, 4);
+// #endif
 		
-		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT (default) = %d\n", 4);
-	}
-	else {
-		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, weight);
-		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT= %d\n", weight);
-	}
+// 		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT (default) = %d\n", 4);
+// 	}
+// 	else {
+// 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, weight);
+// 		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT= %d\n", weight);
+// 	}
+	netif_napi_add(ndev, &ax_local->napi, ax88796b_dma_poll, AX88796_WIGH);
 #if (CONFIG_AX88796B_8BIT_WIDE == 1)
 	ax_local->bus_width = 0;
 #else

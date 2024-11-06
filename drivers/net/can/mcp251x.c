@@ -273,7 +273,7 @@ struct mcp251x_priv {
 	struct net_device *net;
 	struct spi_device *spi;
 	enum mcp251x_model model;
-#if MCP2515_MODE == 1
+#if MCP2515_MODE == 1 || MCP2515_MODE == 2
 	struct sk_buff_head skb_queue;
 	struct napi_struct napi;
 #endif
@@ -329,10 +329,12 @@ static void mcp251x_clean(struct net_device *net)
 }
 
 
-#if MCP2515_MODE == 1
+#if MCP2515_MODE == 1 || MCP2515_MODE == 2
 
-#define MCP251X_NAPI_WEIGHT		(2)
+#define MCP251X_NAPI_WEIGHT		(8)
+#endif
 
+#if MCP2515_MODE == 1 
 // extern unsigned long hndz_read_current_timer(void);
 // static unsigned long gtime1, gtime2, gtime3;
 extern int spi_imx_rt(struct spi_device *spi,struct spi_message *msg,struct spi_transfer *t);
@@ -578,7 +580,8 @@ static void mcp251x_async_read_rx_nowait_frame_end(struct spi_device *spi)
 		// can_led_event(priv->net, CAN_LED_EVENT_RX);
 		// if(gdeg == 1)
 		// 	printk("hndz rec id 0x%x!\n", frame->can_id);
-		netif_rx_ni(skb);
+		// netif_rx_ni(skb);
+		skb_queue_tail(&priv->skb_queue, skb);
 		// netif_rx(skb);
 	}
 
@@ -1279,14 +1282,14 @@ static int mcp251x_stop(struct net_device *net)
 	            gRxTx_state, gIn_stage, grx_num , gtx_num , gintf, geflag, gTxStop, gIrqNoProcess);
 #endif
 	close_candev(net);
-#if MCP2515_MODE == 1
+#if MCP2515_MODE == 1 || MCP2515_MODE == 2
 	napi_disable(&priv->napi);
 #endif
 	priv->force_quit = 1;
 	free_irq(spi->irq, priv);
 	destroy_workqueue(priv->wq);
 	priv->wq = NULL;
-#if MCP2515_MODE == 1	
+#if MCP2515_MODE == 1	|| MCP2515_MODE == 2
 	skb_queue_purge(&priv->skb_queue);
 #endif
 #if MCP2515_MODE == 0
@@ -1341,12 +1344,14 @@ static void mcp251x_error_skb(struct net_device *net, int can_id, int data1)
 {
 	struct sk_buff *skb;
 	struct can_frame *frame;
+	struct mcp251x_priv *priv = netdev_priv(net);
 
 	skb = alloc_can_err_skb(net, &frame);
 	if (skb) {
 		frame->can_id |= can_id;
 		frame->data[1] = data1;
-		netif_rx_ni(skb);
+		// netif_rx_ni(skb);
+		skb_queue_tail(&priv->skb_queue, skb);
 	} else {
 		netdev_err(net, "cannot allocate error skb\n");
 	}
@@ -1375,7 +1380,7 @@ static void mcp251x_error_skb(struct net_device *net, int can_id, int data1)
 
 
 // }
-#if MCP2515_MODE == 1
+#if MCP2515_MODE == 1 || MCP2515_MODE == 2
 static int mcp251x_can_poll(struct napi_struct *napi, int quota)
 {
 	struct net_device *net = napi->dev;
@@ -1403,7 +1408,8 @@ static int mcp251x_can_poll(struct napi_struct *napi, int quota)
 
 	return work_done;
 }
-
+#endif 
+#if MCP2515_MODE == 1 
 static irqreturn_t mcp251x_can_ist(int irq, void *dev_id)
 {
 	struct mcp251x_priv *priv = dev_id;
@@ -2295,6 +2301,7 @@ int spi_irq_process(struct spi_device * spi)
 
 			gRxTx_state = 0;
 			gIn_stage = 0;
+			napi_schedule(&priv->napi);
 			mcp251x_irq_tx_process(priv);
 		}	
 
@@ -2611,7 +2618,7 @@ static int mcp251x_open(struct net_device *net)
 	priv->wq = create_freezable_workqueue("mcp251x_wq");
 #if MCP2515_MODE == 0
 	INIT_WORK(&priv->tx_work, mcp251x_tx_work_handler);
-#elif MCP2515_MODE == 1
+#elif MCP2515_MODE == 1 || MCP2515_MODE == 2
 	skb_queue_head_init(&priv->skb_queue);
 #endif
 
@@ -2637,7 +2644,7 @@ static int mcp251x_open(struct net_device *net)
 	}
 
 	can_led_event(net, CAN_LED_EVENT_OPEN);
-#if MCP2515_MODE == 1
+#if MCP2515_MODE == 1 || MCP2515_MODE == 2
 	napi_enable(&priv->napi);
 #endif
 	netif_wake_queue(net);
@@ -2826,12 +2833,12 @@ static int mcp251x_can_probe(struct spi_device *spi)
 		}
 	}
 
-#if MCP2515_MODE == 1
+#if MCP2515_MODE == 1 || MCP2515_MODE == 2
 	netif_napi_add(net, &priv->napi, mcp251x_can_poll, MCP251X_NAPI_WEIGHT);
 #endif
 
 	SET_NETDEV_DEV(net, &spi->dev);
-
+	printk("hndz spi can dev name %s!\n", net->name);
 	/* Here is OK to not lock the MCP, no one knows about it yet */
 
 	ret = mcp251x_hw_probe(spi);
