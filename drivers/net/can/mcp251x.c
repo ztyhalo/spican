@@ -209,7 +209,7 @@
 
 static int  rst_gpio;
 
-#define  MCP2515_MODE  2
+#define  MCP2515_MODE  1
 
 /*
  * Buffer size required for the largest SPI transfer (i.e., reading a
@@ -580,8 +580,8 @@ static void mcp251x_async_read_rx_nowait_frame_end(struct spi_device *spi)
 		// can_led_event(priv->net, CAN_LED_EVENT_RX);
 		// if(gdeg == 1)
 		// 	printk("hndz rec id 0x%x!\n", frame->can_id);
-		// netif_rx_ni(skb);
-		skb_queue_tail(&priv->skb_queue, skb);
+		netif_rx_ni(skb);
+		// skb_queue_tail(&priv->skb_queue, skb);
 		// netif_rx(skb);
 	}
 
@@ -693,7 +693,7 @@ static void mcp251x_write_bits(struct spi_device *spi, u8 reg,
 
 	mcp251x_spi_trans(spi, 4);
 }
-
+#if MCP2515_MODE == 2
 static void mcp251x_write_direct_reg(struct spi_device *spi, u8 reg, uint8_t val)
 {
 	struct mcp251x_priv *priv = spi_get_drvdata(spi);
@@ -717,6 +717,7 @@ static void mcp251x_write_direct_bits(struct spi_device *spi, u8 reg,
 
 	mcp251x_spi_direct_trans(spi, 4);
 }
+#endif
 #if MCP2515_MODE != 2
 static void mcp251x_hw_tx_frame(struct spi_device *spi, u8 *buf,
 				int len, int tx_buf_idx)
@@ -1274,10 +1275,11 @@ static int mcp251x_stop(struct net_device *net)
 	struct spi_device *spi = priv->spi;
 #if MCP2515_MODE != 0
 	unsigned long flags;
-	int i = 0;
+	
 #endif
 
 #if MCP2515_MODE == 2
+	int i = 0;
 	printk("hndz mcp251x stop  gRxTx_state %d gIn_stage %d   grx_num %d gtx_num %d gintf 0x%x geflag 0x%x gTxStop %d gIrqNoProcess %d!\n",
 	            gRxTx_state, gIn_stage, grx_num , gtx_num , gintf, geflag, gTxStop, gIrqNoProcess);
 #endif
@@ -1295,6 +1297,7 @@ static int mcp251x_stop(struct net_device *net)
 #if MCP2515_MODE == 0
 	mutex_lock(&priv->mcp_lock);
 #else
+#if MCP2515_MODE == 2
 	while(gRxTx_state)
 	{
 		i++;
@@ -1302,6 +1305,7 @@ static int mcp251x_stop(struct net_device *net)
 		if(i > 10)
 			break;		
 	}
+#endif
 	spin_lock_irqsave (&priv->spin_mcp_lock, flags);
 #endif
 #if MCP2515_MODE == 2
@@ -2239,9 +2243,28 @@ int spi_irq_process(struct spi_device * spi)
 		mcp251x_hw_irq_tx_direct_stage2(spi, 0);
 		gRxTx_state = 0;
 
-		// if(gIrqNoProcess == 1)
+		// if(mcp251x_irq_process(priv) == 0)
 		// {
-		// 	mcp251x_irq_read_2regs(spi, CANINTF);
+		// 	if (gintf & CANINTF_RX0IF) {
+		// 		gRxTx_state = 1;
+		// 		gIn_stage = 2;
+		// 		mcp251x_async_read_rx_frame(spi, 0, NULL);
+		// 		return 1;
+		// 	}
+
+		// 	/* receive buffer 1 */
+		// 	if (gintf & CANINTF_RX1IF) {
+		// 		gRxTx_state = 1;
+
+		// 		gIn_stage = 0x12;
+		// 		mcp251x_async_read_rx_frame(spi, 1, NULL);
+		// 		return 1;
+		// 	}
+
+		// 	gRxTx_state = 0;
+		// 	gIn_stage = 0;
+		// 	napi_schedule(&priv->napi);
+		// 	mcp251x_irq_tx_process(priv);
 		// }
 	}
 	else if(gRxTx_state == 1)
@@ -2301,7 +2324,7 @@ int spi_irq_process(struct spi_device * spi)
 
 			gRxTx_state = 0;
 			gIn_stage = 0;
-			napi_schedule(&priv->napi);
+			// napi_schedule(&priv->napi);
 			mcp251x_irq_tx_process(priv);
 		}	
 
