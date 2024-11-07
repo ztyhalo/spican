@@ -580,8 +580,8 @@ static void mcp251x_async_read_rx_nowait_frame_end(struct spi_device *spi)
 		// can_led_event(priv->net, CAN_LED_EVENT_RX);
 		// if(gdeg == 1)
 		// 	printk("hndz rec id 0x%x!\n", frame->can_id);
-		netif_rx_ni(skb);
-		// skb_queue_tail(&priv->skb_queue, skb);
+		// netif_rx_ni(skb);
+		 skb_queue_tail(&priv->skb_queue, skb);
 		// netif_rx(skb);
 	}
 
@@ -1008,50 +1008,53 @@ static void mcp251x_hw_irq_tx_direct_stage2(struct spi_device *spi, int tx_buf_i
 	priv->spi_tx_buf[0] = INSTRUCTION_RTS(1 << tx_buf_idx);
 	mcp251x_spi_direct_trans(priv->spi, 1);
 }
-
-
-static void mcp251x_irq_tx_process(struct mcp251x_priv *priv)
+static void mcp251x_hw_tx_frame(struct spi_device *spi, u8 *buf,
+				int len, int tx_buf_idx)
 {
-	struct spi_device *spi = priv->spi;
-	struct net_device *net = priv->net;
-	struct can_frame *frame;
+	struct mcp251x_priv *priv = spi_get_drvdata(spi);
 
+	memcpy(priv->spi_tx_buf, buf, TXBDAT_OFF + len);
+	mcp251x_spi_direct_trans(spi, TXBDAT_OFF + len);
 	
-
-	if (priv->tx_skb) {
-		
-		if (priv->can.state == CAN_STATE_BUS_OFF) {
-			mcp251x_clean(net);
-		} else {
-
-			gRxTx_state = 2;
-			frame = (struct can_frame *)priv->tx_skb->data;
-
-			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
-				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
-			// printk("hndz send is 0x%x!\n", frame->can_id);
-			mcp251x_hw_irq_tx(spi, frame, 0);
-			priv->tx_len = 1 + frame->can_dlc;
-			can_put_echo_skb(priv->tx_skb, net, 0);
-			// priv->tx_skb = NULL;
-		}
-	}
-	else
-	{
-		if(gTxStop == 1)
-			printk("hndz gTx error!\n");
-	}
-
 }
 
+static void mcp251x_hw_tx(struct spi_device *spi, struct can_frame *frame,
+			  int tx_buf_idx)
+{
+	struct mcp251x_priv *priv = spi_get_drvdata(spi);
+	u32 sid, eid, exide, rtr;
+	u8 buf[SPI_TRANSFER_BUF_LEN];
+
+	exide = (frame->can_id & CAN_EFF_FLAG) ? 1 : 0; /* Extended ID Enable */
+	if (exide)
+		sid = (frame->can_id & CAN_EFF_MASK) >> 18;
+	else
+		sid = frame->can_id & CAN_SFF_MASK; /* Standard ID */
+	eid = frame->can_id & CAN_EFF_MASK; /* Extended ID */
+	rtr = (frame->can_id & CAN_RTR_FLAG) ? 1 : 0; /* Remote transmission */
+
+	buf[TXBCTRL_OFF] = INSTRUCTION_LOAD_TXB(tx_buf_idx);
+	buf[TXBSIDH_OFF] = sid >> SIDH_SHIFT;
+	buf[TXBSIDL_OFF] = ((sid & SIDL_SID_MASK) << SIDL_SID_SHIFT) |
+		(exide << SIDL_EXIDE_SHIFT) |
+		((eid >> SIDL_EID_SHIFT) & SIDL_EID_MASK);
+	buf[TXBEID8_OFF] = GET_BYTE(eid, 1);
+	buf[TXBEID0_OFF] = GET_BYTE(eid, 0);
+	buf[TXBDLC_OFF] = (rtr << DLC_RTR_SHIFT) | frame->can_dlc;
+	memcpy(buf + TXBDAT_OFF, frame->data, frame->can_dlc);
+	mcp251x_hw_tx_frame(spi, buf, frame->can_dlc, tx_buf_idx);
+
+	/* use INSTRUCTION_RTS, to avoid "repeated frame problem" */
+	priv->spi_tx_buf[0] = INSTRUCTION_RTS(1 << tx_buf_idx);
+	mcp251x_spi_direct_trans(priv->spi, 1);
+}
 static netdev_tx_t mcp251x_hard_start_xmit(struct sk_buff *skb,
 					   struct net_device *net)
 {
 	struct mcp251x_priv *priv = netdev_priv(net);
 	struct spi_device *spi = priv->spi;
-	unsigned long flags;
 	struct can_frame *frame;
-
+	unsigned long flags;
 	spin_lock_irqsave (&priv->spin_mcp_lock, flags);
 	if (priv->tx_skb || priv->tx_len) {
 		dev_warn(&spi->dev, "hard_xmit called while tx busy\n");
@@ -1064,39 +1067,132 @@ static netdev_tx_t mcp251x_hard_start_xmit(struct sk_buff *skb,
 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
 		return NETDEV_TX_OK;
 	}
+	if(gTxStop == 1)
+	{
+		printk("hndz logic error!\n");
+	}
 	gTxStop = 1;
 	netif_stop_queue(net);
 	priv->tx_skb = skb;
-	// queue_work(priv->wq, &priv->tx_work);
-	
-	
+
 	if(gRxTx_state != 0)
 	{
 		// printk("hndz spi is using %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
 		return NETDEV_TX_OK;
 	}
-
+	
 	if (priv->tx_skb) {
 		if (priv->can.state == CAN_STATE_BUS_OFF) {
 			mcp251x_clean(net);
 		} else {
-
-			gRxTx_state = 2;
 			frame = (struct can_frame *)priv->tx_skb->data;
 
 			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
 				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
-			mcp251x_hw_irq_tx(spi, frame, 0);
+			mcp251x_hw_tx(spi, frame, 0);
 			priv->tx_len = 1 + frame->can_dlc;
 			can_put_echo_skb(priv->tx_skb, net, 0);
-			// priv->tx_skb = NULL;
+			priv->tx_skb = NULL;
 		}
 	}
 	spin_unlock_irqrestore (&priv->spin_mcp_lock, flags);
 
 	return NETDEV_TX_OK;
 }
+
+static void mcp251x_irq_tx_process(struct mcp251x_priv *priv)
+{
+	struct spi_device *spi = priv->spi;
+	struct net_device *net = priv->net;
+	struct can_frame *frame;
+
+	
+
+	if (priv->tx_skb) {
+		
+		// if(gTxStop == 1)
+		// 	return;
+
+		if (priv->can.state == CAN_STATE_BUS_OFF) {
+			mcp251x_clean(net);
+		} else {
+
+			// gRxTx_state = 2;
+			frame = (struct can_frame *)priv->tx_skb->data;
+
+			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
+				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
+			// printk("hndz send is 0x%x!\n", frame->can_id);
+			// mcp251x_hw_irq_tx(spi, frame, 0);
+			mcp251x_hw_tx(spi, frame, 0);
+			priv->tx_len = 1 + frame->can_dlc;
+			can_put_echo_skb(priv->tx_skb, net, 0);
+			priv->tx_skb = NULL;
+		}
+	}
+	// else
+	// {
+	// 	if(gTxStop == 1)
+	// 		printk("hndz gTx error!\n");
+	// }
+
+}
+
+// static netdev_tx_t mcp251x_hard_start_xmit(struct sk_buff *skb,
+// 					   struct net_device *net)
+// {
+// 	struct mcp251x_priv *priv = netdev_priv(net);
+// 	struct spi_device *spi = priv->spi;
+// 	unsigned long flags;
+// 	struct can_frame *frame;
+
+// 	spin_lock_irqsave (&priv->spin_mcp_lock, flags);
+// 	if (priv->tx_skb || priv->tx_len) {
+// 		dev_warn(&spi->dev, "hard_xmit called while tx busy\n");
+// 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
+// 		return NETDEV_TX_BUSY;
+// 	}
+
+// 	if (can_dropped_invalid_skb(net, skb))
+// 	{
+// 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
+// 		return NETDEV_TX_OK;
+// 	}
+// 	gTxStop = 1;
+// 	netif_stop_queue(net);
+// 	priv->tx_skb = skb;
+// 	// queue_work(priv->wq, &priv->tx_work);
+	
+	
+// 	if(gRxTx_state != 0)
+// 	{
+// 		// printk("hndz spi is using %d gIn_stage %d!\n", gRxTx_state, gIn_stage);
+// 		spin_unlock_irqrestore(&priv->spin_mcp_lock, flags);
+// 		return NETDEV_TX_OK;
+// 	}
+
+// 	if (priv->tx_skb) {
+// 		if (priv->can.state == CAN_STATE_BUS_OFF) {
+// 			mcp251x_clean(net);
+// 		} else {
+
+// 			gRxTx_state = 2;
+// 			frame = (struct can_frame *)priv->tx_skb->data;
+
+// 			if (frame->can_dlc > CAN_FRAME_MAX_DATA_LEN)
+// 				frame->can_dlc = CAN_FRAME_MAX_DATA_LEN;
+// 			mcp251x_hw_irq_tx(spi, frame, 0);
+// 			priv->tx_len = 1 + frame->can_dlc;
+// 			can_put_echo_skb(priv->tx_skb, net, 0);
+// 			// priv->tx_skb = NULL;
+// 		}
+// 	}
+// 	spin_unlock_irqrestore (&priv->spin_mcp_lock, flags);
+
+// 	return NETDEV_TX_OK;
+// }
+
 
 static void mcp251x_hw_direct_sleep(struct spi_device *spi)
 {
@@ -2237,37 +2333,14 @@ int spi_irq_process(struct spi_device * spi)
 
 	girqDmaState = 0;
 	
-	if(gRxTx_state == 2) //tx 
-	{
+	// if(gRxTx_state == 2) //tx 
+	// {
 
-		mcp251x_hw_irq_tx_direct_stage2(spi, 0);
-		gRxTx_state = 0;
-
-		// if(mcp251x_irq_process(priv) == 0)
-		// {
-		// 	if (gintf & CANINTF_RX0IF) {
-		// 		gRxTx_state = 1;
-		// 		gIn_stage = 2;
-		// 		mcp251x_async_read_rx_frame(spi, 0, NULL);
-		// 		return 1;
-		// 	}
-
-		// 	/* receive buffer 1 */
-		// 	if (gintf & CANINTF_RX1IF) {
-		// 		gRxTx_state = 1;
-
-		// 		gIn_stage = 0x12;
-		// 		mcp251x_async_read_rx_frame(spi, 1, NULL);
-		// 		return 1;
-		// 	}
-
-		// 	gRxTx_state = 0;
-		// 	gIn_stage = 0;
-		// 	napi_schedule(&priv->napi);
-		// 	mcp251x_irq_tx_process(priv);
-		// }
-	}
-	else if(gRxTx_state == 1)
+	// 	// mcp251x_hw_irq_tx_direct_stage2(spi, 0);
+	// 	// gRxTx_state = 0;
+	// }
+	// else 
+	if(gRxTx_state == 1)
 	{
 		switch (gIn_stage) {
 			case 2:
@@ -2324,7 +2397,7 @@ int spi_irq_process(struct spi_device * spi)
 
 			gRxTx_state = 0;
 			gIn_stage = 0;
-			// napi_schedule(&priv->napi);
+			napi_schedule(&priv->napi);
 			mcp251x_irq_tx_process(priv);
 		}	
 
