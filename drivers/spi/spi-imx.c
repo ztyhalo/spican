@@ -1390,7 +1390,6 @@ spi_imx_unprepare_message(struct spi_master *master, struct spi_message *msg)
 	return 0;
 }
 
-
 static int spi_imx_rt_reg(struct spi_device *spi,struct spi_transfer *transfer)
 {
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
@@ -1405,7 +1404,7 @@ static int spi_imx_rt_reg(struct spi_device *spi,struct spi_transfer *transfer)
 		count = 0;
 		while((readl(spi_imx->base + MX51_ECSPI_STAT) & (1 << 0)) == 0){
 			count++;
-			if (count == 0x0F000000){
+			if (count == 0x000000F8){
 				printk("www spi_imx_rt_reg tx timeout\n");
 				break;
 			}
@@ -1417,7 +1416,7 @@ static int spi_imx_rt_reg(struct spi_device *spi,struct spi_transfer *transfer)
 		count = 0;
 		while((readl(spi_imx->base + MX51_ECSPI_STAT) & (1 << 3)) == 0){
 			count++;
-			if (count == 0x0F000000){
+			if (count == 0x000000F8){
 				printk("www spi_imx_rt_reg rx timeout\n");
 				break;
 			}
