@@ -1280,12 +1280,12 @@ int spi_imx_sdma_rt_stage1(struct spi_device *spi,struct spi_message *msg, struc
 	struct spi_imx_data *spi_imx = spi_master_get_devdata(spi->master);
 	msg->spi = spi;
 
-	// ret = spi_imx_prepare_message(spi->master, msg);
-	// if (ret) {
-	// 	dev_err(&master->dev,
-	// 		"failed to prepare message: %d\n", ret);
-	// 	return ret;
-	// }
+	ret = spi_imx_prepare_message(spi->master, msg);
+	if (ret) {
+		dev_err(&master->dev,
+			"failed to prepare message: %d\n", ret);
+		return ret;
+	}
 	master->cur_msg_prepared = true;
 	ret = hndz_spi_map_msg(master, msg);
 	if (ret) {
