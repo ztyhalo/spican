@@ -268,8 +268,9 @@ static int __init etherm_addr(char *addr)
 
 
 
-#define EIM_CS0_PHY_START_ADDR 0x08000000	
-static struct dma_chan *dma_m2m_chan = NULL;
+#define EIM_CS0_PHY_START_ADDR   0x08000000
+
+static struct dma_chan *dma_m2m_rxchan = NULL;
 static struct dma_chan *dma_m2m_txchan = NULL;
 // static struct completion dma_m2m_tx_ok;				//DMA传输完成等待量
 // static struct completion dma_m2m_rx_ok;				//DMA传输完成等待量
@@ -307,7 +308,7 @@ static inline void eim_sdma_rx_init_config(void)
 	struct dma_slave_config slave_config = {};
 	// memset(&eim_dma_m2m_config, 0x00, sizeof(struct dma_slave_config));
 
-	gdma_dst = dma_map_single(NULL, gEIMrxbuf, 2048, DMA_DEV_TO_MEM); //map 映射
+	// gdma_dst = dma_map_single(NULL, gEIMrxbuf, 2048, DMA_DEV_TO_MEM); //map 映射
 
 	slave_config.direction = DMA_DEV_TO_MEM;
 	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
@@ -315,7 +316,7 @@ static inline void eim_sdma_rx_init_config(void)
 	slave_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
 	slave_config.dst_addr = gdma_dst;
 
-	dmaengine_slave_config(dma_m2m_chan, &slave_config);
+	dmaengine_slave_config(dma_m2m_rxchan, &slave_config);
 
 }
 
@@ -323,7 +324,7 @@ static inline void eim_sdma_tx_init_config(void)
 {
 	struct dma_slave_config slave_config = {};
 
-	gdma_src = dma_map_single(NULL, gEIMtxbuf, 2048, 	DMA_MEM_TO_DEV); //map 映射
+	// gdma_src = dma_map_single(NULL, gEIMtxbuf, 2048, 	DMA_MEM_TO_DEV); //map 映射
 
 	slave_config.direction = DMA_MEM_TO_DEV;
 	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
@@ -345,8 +346,8 @@ static int req_sdma_channel(void)
 	m2m_dma_data.peripheral_type = IMX_DMATYPE_MEMORY;
 	m2m_dma_data.priority = DMA_PRIO_HIGH;
 
-	dma_m2m_chan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
-	if (!dma_m2m_chan) {
+	dma_m2m_rxchan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
+	if (!dma_m2m_rxchan) {
 		printk("Error opening the SDMA memory to memory channel\n");
 		return -EINVAL;
 	}
@@ -367,15 +368,17 @@ static int req_sdma_channel(void)
 	return 0;
 }
 
-static int eim_sdma_init(void * para)
+static int eim_sdma_init(struct net_device *ndev)
 {
-	gEIMrxbuf = kzalloc(2048, GFP_DMA);
+	gEIMrxbuf = dma_alloc_coherent(NULL, 2048, &gdma_dst, GFP_KERNEL);
+	// gEIMrxbuf = kzalloc(2048, GFP_DMA);
 	if(!gEIMrxbuf)
 	{
 		printk("hndz eim rx buf alloc error!!!\n");
 		return -1;
 	}
-	gEIMtxbuf = kzalloc(2048, GFP_DMA);
+	gEIMtxbuf = dma_alloc_coherent(NULL, 2048, &gdma_src, GFP_KERNEL);
+	// gEIMtxbuf = kzalloc(2048, GFP_DMA);
 	if(!gEIMtxbuf)
 	{
 		printk("hndz eim tx buf alloc error!!!\n");
@@ -819,7 +822,7 @@ static  int eim_sdma_tx_start(struct net_device *ndev, int count, const unsigned
 	// 	return ret;
 	// }
 
-	eim_sdma_tx_init_config();
+	// eim_sdma_tx_init_config();
 
 		/* This shouldn't happen. If it does, it's the last thing you'll see */
 	if (ax_local->dmaing)
@@ -922,9 +925,9 @@ static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, 
 	writeb (E8390_RREAD, ax_base + ADDR_SHIFT16(E8390_CMD));
 
 
-	eim_sdma_rx_init_config();
+	// eim_sdma_rx_init_config();
 
-	dma_m2m_desc = dma_m2m_chan->device->device_prep_dma_memcpy(dma_m2m_chan, gdma_dst,
+	dma_m2m_desc = dma_m2m_rxchan->device->device_prep_dma_memcpy(dma_m2m_rxchan, gdma_dst,
 	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_DEV_TO_MEM);													
 	if (!dma_m2m_desc)
 	{
@@ -954,7 +957,7 @@ static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, 
 	gRxNumcount = 0;
 
 	dmaengine_submit(dma_m2m_desc);
-	dma_async_issue_pending(dma_m2m_chan);
+	dma_async_issue_pending(dma_m2m_rxchan);
 	return 0;	
 }
 
@@ -4053,6 +4056,23 @@ static int __exit ax88796b_exit_module(struct platform_device *pdev)
 	void __iomem *ax_base = ax_local->membase;
 
 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
+	printk("hndz ax88796 exit!\n");
+
+	if (dma_m2m_rxchan) {
+		dma_release_channel(dma_m2m_rxchan);
+		dma_m2m_rxchan = NULL;
+
+		dma_free_coherent(NULL, 2048, (void *)gEIMrxbuf, gdma_dst);
+		gEIMrxbuf = NULL;
+	}
+
+	if (dma_m2m_txchan) {
+		dma_release_channel(dma_m2m_txchan);
+		dma_m2m_txchan = NULL;
+
+		dma_free_coherent(NULL, 2048, (void *)gEIMtxbuf, gdma_src);
+		gEIMtxbuf = NULL;
+	}
 
 	platform_set_drvdata (pdev, NULL);
 	unregister_netdev (ndev);
