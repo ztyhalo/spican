@@ -270,8 +270,9 @@ static int __init etherm_addr(char *addr)
 
 #define EIM_CS0_PHY_START_ADDR   0x08000000
 
-static struct dma_chan *dma_m2m_rxchan = NULL;
-static struct dma_chan *dma_m2m_txchan = NULL;
+static struct dma_chan * dma_m2m_txchan = NULL;
+static struct dma_chan * dma_m2m_rxchan = NULL;
+
 // static struct completion dma_m2m_tx_ok;				//DMA传输完成等待量
 // static struct completion dma_m2m_rx_ok;				//DMA传输完成等待量
 static unsigned char * gEIMrxbuf = NULL;
@@ -310,7 +311,7 @@ static inline void eim_sdma_rx_init_config(void)
 
 	// gdma_dst = dma_map_single(NULL, gEIMrxbuf, 2048, DMA_DEV_TO_MEM); //map 映射
 
-	slave_config.direction = DMA_DEV_TO_MEM;
+	slave_config.direction = DMA_MEM_TO_MEM;
 	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 	slave_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
@@ -326,7 +327,7 @@ static inline void eim_sdma_tx_init_config(void)
 
 	// gdma_src = dma_map_single(NULL, gEIMtxbuf, 2048, 	DMA_MEM_TO_DEV); //map 映射
 
-	slave_config.direction = DMA_MEM_TO_DEV;
+	slave_config.direction = DMA_MEM_TO_MEM;
 	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
 	slave_config.src_addr = gdma_src;
@@ -849,7 +850,7 @@ static  int eim_sdma_tx_start(struct net_device *ndev, int count, const unsigned
 	writeb (E8390_RWRITE, ax_base + ADDR_SHIFT16(E8390_CMD));
 
 	dma_m2m_desc = dma_m2m_txchan->device->device_prep_dma_memcpy(dma_m2m_txchan,
-	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  gdma_src, size, DMA_MEM_TO_DEV);													
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  gdma_src, size, DMA_MEM_TO_MEM);													
 	if (!dma_m2m_desc)
 	{
 		ax_local->dmaing = 0;
@@ -928,7 +929,7 @@ static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, 
 	// eim_sdma_rx_init_config();
 
 	dma_m2m_desc = dma_m2m_rxchan->device->device_prep_dma_memcpy(dma_m2m_rxchan, gdma_dst,
-	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_DEV_TO_MEM);													
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_MEM_TO_MEM);													
 	if (!dma_m2m_desc)
 	{
 		ax_local->dmaing = 0;
