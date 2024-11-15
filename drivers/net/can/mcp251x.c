@@ -209,7 +209,7 @@
 
 static int  rst_gpio;
 
-#define  MCP2515_MODE  2
+#define  MCP2515_MODE  1
 
 /*
  * Buffer size required for the largest SPI transfer (i.e., reading a
@@ -1452,7 +1452,7 @@ static void mcp251x_error_skb(struct net_device *net, int can_id, int data1)
 {
 	struct sk_buff *skb;
 	struct can_frame *frame;
-	struct mcp251x_priv *priv = netdev_priv(net);
+	// struct mcp251x_priv *priv = netdev_priv(net);
 
 	skb = alloc_can_err_skb(net, &frame);
 	if (skb) {
