@@ -1448,20 +1448,22 @@ static int mcp251x_stop(struct net_device *net)
 	return 0;
 }
 
-static void mcp251x_error_skb(struct net_device *net, int can_id, int data1)
+static int mcp251x_error_skb(struct net_device *net, int can_id, int data1)
 {
 	struct sk_buff *skb;
 	struct can_frame *frame;
-	// struct mcp251x_priv *priv = netdev_priv(net);
+	struct mcp251x_priv *priv = netdev_priv(net);
 
 	skb = alloc_can_err_skb(net, &frame);
 	if (skb) {
 		frame->can_id |= can_id;
 		frame->data[1] = data1;
-		netif_rx_ni(skb);
-		// skb_queue_tail(&priv->skb_queue, skb);
+		// netif_rx_ni(skb);
+		skb_queue_tail(&priv->skb_queue, skb);
+		return 0;
 	} else {
 		netdev_err(net, "cannot allocate error skb\n");
+		return -1;
 	}
 }
 
@@ -1518,6 +1520,29 @@ static int mcp251x_can_poll(struct napi_struct *napi, int quota)
 }
 #endif 
 #if MCP2515_MODE == 1 
+
+static unsigned int fifo_can_get_echo_skb(struct net_device *dev, unsigned int idx)
+{
+	struct can_priv *priv = netdev_priv(dev);
+	struct mcp251x_priv *mcppriv = netdev_priv(dev);
+
+	BUG_ON(idx >= priv->echo_skb_max);
+
+	if (priv->echo_skb[idx]) {
+		struct sk_buff *skb = priv->echo_skb[idx];
+		struct can_frame *cf = (struct can_frame *)skb->data;
+		u8 dlc = cf->can_dlc;
+
+		// netif_rx(priv->echo_skb[idx]);
+		skb_queue_tail(&mcppriv->skb_queue, skb);
+		priv->echo_skb[idx] = NULL;
+
+		return dlc;
+	}
+
+	return 0;
+}
+
 static irqreturn_t mcp251x_can_ist(int irq, void *dev_id)
 {
 	struct mcp251x_priv *priv = dev_id;
@@ -1575,8 +1600,8 @@ static irqreturn_t mcp251x_can_ist(int irq, void *dev_id)
 				clear_intf |= CANINTF_RX1IF;
 		}
 
-		if (received)
-			napi_schedule(&priv->napi);
+		// if (received)
+		// 	napi_schedule(&priv->napi);
 		// received=0;
 		/* any error or tx interrupt we need to clear? */
 		if (intf & (CANINTF_ERR | CANINTF_TX))
@@ -1641,7 +1666,8 @@ static irqreturn_t mcp251x_can_ist(int irq, void *dev_id)
 				can_id |= CAN_ERR_CRTL;
 				data1 |= CAN_ERR_CRTL_RX_OVERFLOW;
 			}
-			mcp251x_error_skb(net, can_id, data1);
+			if(mcp251x_error_skb(net, can_id, data1) == 0)
+				received++;
 		}
 
 		if (priv->can.state == CAN_STATE_BUS_OFF) {
@@ -1662,7 +1688,8 @@ static irqreturn_t mcp251x_can_ist(int irq, void *dev_id)
 			net->stats.tx_bytes += priv->tx_len - 1;
 			can_led_event(net, CAN_LED_EVENT_TX);
 			if (priv->tx_len) {
-				can_get_echo_skb(net, 0);
+				fifo_can_get_echo_skb(net, 0);
+				received++;
 				priv->tx_len = 0;
 			}
 			netif_wake_queue(net);
@@ -1670,6 +1697,8 @@ static irqreturn_t mcp251x_can_ist(int irq, void *dev_id)
 
 	}
 	spin_unlock(&priv->spin_mcp_lock);
+	if (received)
+		napi_schedule(&priv->napi);
 	return IRQ_HANDLED;
 }
 
