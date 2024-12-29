@@ -464,7 +464,7 @@ static int fb_show_logo_line(struct fb_info *info, int rotate,
 	if (logo == NULL || info->state != FBINFO_STATE_RUNNING ||
 	    info->flags & FBINFO_MODULE)
 		return 0;
-
+	printk("hndz display logo!\n");
 	image.depth = 8;
 	image.data = logo->data;
 

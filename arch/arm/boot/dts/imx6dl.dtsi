@@ -115,7 +115,7 @@
 
 		aips1: aips-bus@02000000 {
 			vpu@02040000 {
-				iramsize = <0>;
+				iramsize = <0x9000>;
 			};
 
 			iomuxc: iomuxc@020e0000 {

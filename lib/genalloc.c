@@ -281,6 +281,8 @@ unsigned long gen_pool_alloc(struct gen_pool *pool, size_t size)
 
 	if (size == 0)
 		return 0;
+	printk("hndz gen pool alloc size %d!\n", size);
+	dump_stack();
 
 	nbits = (size + (1UL << order) - 1) >> order;
 	rcu_read_lock();
