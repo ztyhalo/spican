@@ -901,7 +901,7 @@ static int mxcfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
 static inline u_int _chan_to_field(u_int chan, struct fb_bitfield *bf)
 {
 	chan &= 0xffff;
-	chan >>= 16 - bf->length;
+	chan >>= 24 - bf->length;
 	return chan << bf->offset;
 }
 

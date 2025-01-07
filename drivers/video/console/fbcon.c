@@ -1317,6 +1317,8 @@ static void fbcon_cursor(struct vc_data *vc, int mode)
 	struct fbcon_ops *ops = info->fbcon_par;
 	int y;
  	int c = scr_readw((u16 *) vc->vc_pos);
+	
+	return;
 
 	if (fbcon_is_inactive(vc, info) || vc->vc_deccm != 1)
 		return;
