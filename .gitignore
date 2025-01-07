@@ -64,8 +64,6 @@ include/config
 include/generated
 arch/*/include/generated
 !.config
-!arch/arm/boot/zImage
-!arch/arm/boot/dts/imx6dl-sabresd.dtb
 # stgit generated dirs
 patches-*
 
