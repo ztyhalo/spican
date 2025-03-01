@@ -196,7 +196,7 @@ static struct reg_value ov5640_init_setting_30fps_VGA[] = {
 };
 
 static struct reg_value ov5640_setting_30fps_VGA_640_480[] = {
-	{0x4300, 0x6f, 0, 0}, {0x501f, 0x01, 0, 0}, 
+	// {0x4300, 0x6f, 0, 0}, {0x501f, 0x01, 0, 0}, 
 	{0x3035, 0x14, 0, 0}, {0x3036, 0x38, 0, 0}, {0x3c07, 0x08, 0, 0},
 	{0x3c09, 0x1c, 0, 0}, {0x3c0a, 0x9c, 0, 0}, {0x3c0b, 0x40, 0, 0},
 	{0x3820, 0x41, 0, 0}, {0x3821, 0x01, 0, 0}, {0x3814, 0x31, 0, 0},
@@ -714,9 +714,14 @@ static void ov5640_reset(void)
 static int ov5640_power_on(struct device *dev)
 {
 	int ret = 0;
-
+	printk("hndz ov5640 dev name %s!\n",dev_name(dev));
 	io_regulator = devm_regulator_get(dev, "DOVDD");
 	if (!IS_ERR(io_regulator)) {
+		printk("hndz io_regulator ok!\n");
+		// if(io_regulator->supply_name != NULL)
+		// {
+		// 	printk("hndz supply_name name %s!\n", io_regulator->supply_name );
+		// }
 		regulator_set_voltage(io_regulator,
 				      OV5640_VOLTAGE_DIGITAL_IO,
 				      OV5640_VOLTAGE_DIGITAL_IO);
@@ -820,11 +825,13 @@ static int AE_low, AE_high, AE_Target = 52;
 
 void OV5640_stream_on(void)
 {
+	printk("hndz stream start!\n");
 	ov5640_write_reg(0x4202, 0x00);
 }
 
 void OV5640_stream_off(void)
 {
+	printk("hndz stream off!\n");
 	ov5640_write_reg(0x4202, 0x0f);
 }
 
@@ -852,19 +859,20 @@ int OV5640_get_sysclk(void)
 
 	temp1 = ov5640_read_reg(0x3036, &temp);
 	Multiplier = temp1;
-
+	printk("hndz Multiplier %d!\n", Multiplier);
 	temp1 = ov5640_read_reg(0x3037, &temp);
 	PreDiv = temp1 & 0x0f;
 	Pll_rdiv = ((temp1 >> 4) & 0x01) + 1;
-
+	printk("hndz PreDiv %d!\n", PreDiv);
 	temp1 = ov5640_read_reg(0x3108, &temp);
 	temp2 = temp1 & 0x03;
 	sclk_rdiv = sclk_rdiv_map[temp2];
 
 	VCO = xvclk * Multiplier / PreDiv;
-
+	printk("hndz vco is %d!\n", VCO);
 	sysclk = VCO / SysDiv / Pll_rdiv * 2 / Bit_div2x / sclk_rdiv;
-
+	printk("hndz  SysDiv %d Pll_rdiv %d  Bit_div2x %d sclk_rdiv %d !\n",  SysDiv , Pll_rdiv , Bit_div2x , sclk_rdiv);
+	printk("hndz sys clk is %d!\n", sysclk);
 	return sysclk;
 }
 
@@ -872,7 +880,7 @@ void OV5640_set_night_mode(void)
 {
 	 /* read HTS from register settings */
 	u8 mode;
-
+	printk("hndz set night mode!\n");
 	ov5640_read_reg(0x3a00, &mode);
 	mode &= 0xfb;
 	ov5640_write_reg(0x3a00, mode);
@@ -886,7 +894,7 @@ int OV5640_get_HTS(void)
 
 	HTS = ov5640_read_reg(0x380c, &temp);
 	HTS = (HTS<<8) + ov5640_read_reg(0x380d, &temp);
-
+	printk("hndz hts is %d!\n", HTS);
 	return HTS;
 }
 
@@ -900,7 +908,7 @@ int OV5640_get_VTS(void)
 	VTS = ov5640_read_reg(0x380e, &temp);
 
 	VTS = (VTS<<8) + ov5640_read_reg(0x380f, &temp);
-
+	printk("hndz vts is %d!\n", VTS);
 	return VTS;
 }
 
@@ -911,10 +919,10 @@ int OV5640_set_VTS(int VTS)
 
 	 temp = VTS & 0xff;
 	 ov5640_write_reg(0x380f, temp);
-
+	printk("hndz set vts is %d!\n", temp);
 	 temp = VTS>>8;
 	 ov5640_write_reg(0x380e, temp);
-
+	printk("hndz set vts is %d!\n", temp);
 	 return 0;
 }
 
@@ -927,7 +935,7 @@ int OV5640_get_shutter(void)
 	shutter = (ov5640_read_reg(0x03500, &temp) & 0x0f);
 	shutter = (shutter<<8) + ov5640_read_reg(0x3501, &temp);
 	shutter = (shutter<<4) + (ov5640_read_reg(0x3502, &temp)>>4);
-
+	printk("hndz get shutter down!\n");
 	 return shutter;
 }
 
@@ -948,7 +956,7 @@ int OV5640_set_shutter(int shutter)
 
 	 temp = shutter>>12;
 	 ov5640_write_reg(0x3500, temp);
-
+	printk("hndz set shutter down!\n");
 	 return 0;
 }
 
@@ -960,7 +968,7 @@ int OV5640_get_gain16(void)
 
 	gain16 = ov5640_read_reg(0x350a, &temp) & 0x03;
 	gain16 = (gain16<<8) + ov5640_read_reg(0x350b, &temp);
-
+	printk("hndz get gain16 0x%x!\n", gain16);
 	return gain16;
 }
 
@@ -968,6 +976,7 @@ int OV5640_set_gain16(int gain16)
 {
 	/* write gain, 16 = 1x */
 	u8 temp;
+	printk("hndz set gain16 0x%x!\n", gain16);
 	gain16 = gain16 & 0x3ff;
 
 	temp = gain16 & 0xff;
@@ -975,7 +984,7 @@ int OV5640_set_gain16(int gain16)
 
 	temp = gain16>>8;
 	ov5640_write_reg(0x350a, temp);
-
+	printk("hndz set gain16 0x%x!\n", gain16);
 	return 0;
 }
 
@@ -1007,6 +1016,7 @@ int OV5640_get_light_freq(void)
 			/* 60Hz */
 		}
 	}
+	printk("hndz get light freq %d!\n", light_freq);
 	return light_freq;
 }
 
@@ -1014,7 +1024,7 @@ void OV5640_set_bandingfilter(void)
 {
 	int prev_VTS;
 	int band_step60, max_band60, band_step50, max_band50;
-
+	printk("hndz set banding filter!\n");
 	/* read preview PCLK */
 	prev_sysclk = OV5640_get_sysclk();
 	/* read preview HTS */
@@ -1053,7 +1063,7 @@ int OV5640_set_AE_target(int target)
 		fast_high = 255;
 
 	fast_low = AE_low >> 1;
-
+	printk("hndz set ae target!\n");
 	ov5640_write_reg(0x3a0f, AE_high);
 	ov5640_write_reg(0x3a10, AE_low);
 	ov5640_write_reg(0x3a1b, AE_high);
@@ -1076,6 +1086,7 @@ void OV5640_turn_on_AE_AG(int enable)
 		/* turn off AE/AG */
 		ae_ag_ctrl = ae_ag_ctrl | 0x03;
 	}
+	printk("hndz turn ae ag 0x%x!\n", ae_ag_ctrl);
 	ov5640_write_reg(0x3503, ae_ag_ctrl);
 }
 
@@ -1084,6 +1095,8 @@ bool binning_on(void)
 	u8 temp;
 	ov5640_read_reg(0x3821, &temp);
 	temp &= 0xfe;
+
+	printk("hndz binning on %d!\n", temp);
 	if (temp)
 		return true;
 	else
@@ -1096,6 +1109,7 @@ static void ov5640_set_virtual_channel(int channel)
 
 	ov5640_read_reg(0x4814, &channel_id);
 	channel_id &= ~(3 << 6);
+	printk("hndz set virtual channel %d!\n", channel_id);
 	ov5640_write_reg(0x4814, channel_id | (channel << 6));
 }
 
@@ -1166,7 +1180,7 @@ static int ov5640_change_mode_exposure_calc(enum ov5640_frame_rate frame_rate,
 	if (ov5640_data.pix.width == 0 || ov5640_data.pix.height == 0 ||
 		pModeSetting == NULL || ArySize == 0)
 		return -EINVAL;
-
+	printk("hndz exposure_calc frame_rate %d mode %d!\n", frame_rate, mode);
 	/* auto focus */
 	/* OV5640_auto_focus();//if no af function, just skip it */
 
@@ -1287,6 +1301,8 @@ static int ov5640_change_mode_direct(enum ov5640_frame_rate frame_rate,
 		ov5640_mode_info_data[frame_rate][mode].width;
 	ov5640_data.pix.height =
 		ov5640_mode_info_data[frame_rate][mode].height;
+	
+	printk("hndz  mode direct  frame_rate %d mode %d!\n", frame_rate, mode);
 
 	if (ov5640_data.pix.width == 0 || ov5640_data.pix.height == 0 ||
 		pModeSetting == NULL || ArySize == 0)
@@ -1309,64 +1325,64 @@ static int ov5640_change_mode_direct(enum ov5640_frame_rate frame_rate,
 err:
 	return retval;
 }
-static int ov5640_auto_focus(void)
-{
-        u16 addr = 0x8000;
-        u16 i;
-        u8 state = 0x8F;
-        u8 temp = 0;
-        u16 retry = 0;
+// static int ov5640_auto_focus(void)
+// {
+//         u16 addr = 0x8000;
+//         u16 i;
+//         u8 state = 0x8F;
+//         u8 temp = 0;
+//         u16 retry = 0;
 
-        ov5640_write_reg(0x3000, 0x20);
+//         ov5640_write_reg(0x3000, 0x20);
 
-        for (i = 0; i < sizeof(OV5640_AF_Config); i++) {
-            ov5640_write_reg(addr, OV5640_AF_Config[i]);
-            addr++;
-        }
+//         for (i = 0; i < sizeof(OV5640_AF_Config); i++) {
+//             ov5640_write_reg(addr, OV5640_AF_Config[i]);
+//             addr++;
+//         }
 
-        ov5640_write_reg(0x3022, 0x00);
-        ov5640_write_reg(0x3023, 0x00);
-        ov5640_write_reg(0x3024, 0x00);
-        ov5640_write_reg(0x3025, 0x00);
-        ov5640_write_reg(0x3026, 0x00);
-        ov5640_write_reg(0x3027, 0x00);
-        ov5640_write_reg(0x3028, 0x00);
-        ov5640_write_reg(0x3029, 0x7f);
-        ov5640_write_reg(0x3000, 0x00);
+//         ov5640_write_reg(0x3022, 0x00);
+//         ov5640_write_reg(0x3023, 0x00);
+//         ov5640_write_reg(0x3024, 0x00);
+//         ov5640_write_reg(0x3025, 0x00);
+//         ov5640_write_reg(0x3026, 0x00);
+//         ov5640_write_reg(0x3027, 0x00);
+//         ov5640_write_reg(0x3028, 0x00);
+//         ov5640_write_reg(0x3029, 0x7f);
+//         ov5640_write_reg(0x3000, 0x00);
 
-        i = 0;
+//         i = 0;
 
-        do {
-            ov5640_read_reg(0x3029, &state);
-            msleep(5);
-            i++;
-            if (i > 1000) return 1;
-        } while(state != 0x70);
+//         do {
+//             ov5640_read_reg(0x3029, &state);
+//             msleep(5);
+//             i++;
+//             if (i > 1000) return 1;
+//         } while(state != 0x70);
 
-        ov5640_write_reg(0x3023, 0x01);
-        ov5640_write_reg(0x3022, 0x08);
+//         ov5640_write_reg(0x3023, 0x01);
+//         ov5640_write_reg(0x3022, 0x08);
 
-        do {
-            ov5640_read_reg(0x3023, &temp);
-            retry++;
-            if (retry > 1000) return 2;
-            msleep(5);
-        } while (temp != 0x00);
+//         do {
+//             ov5640_read_reg(0x3023, &temp);
+//             retry++;
+//             if (retry > 1000) return 2;
+//             msleep(5);
+//         } while (temp != 0x00);
 
-        ov5640_write_reg(0x3023, 0x01);
-        ov5640_write_reg(0x3022, 0x04);
+//         ov5640_write_reg(0x3023, 0x01);
+//         ov5640_write_reg(0x3022, 0x04);
 
-        retry = 0;
+//         retry = 0;
 
-        do {
-            ov5640_read_reg(0x3023, &temp);
-            retry++;
-            if (retry > 1000) return 2;
-            msleep(5);
-        } while (temp != 0x00);
+//         do {
+//             ov5640_read_reg(0x3023, &temp);
+//             retry++;
+//             if (retry > 1000) return 2;
+//             msleep(5);
+//         } while (temp != 0x00);
 
-        return 0;
-}
+//         return 0;
+// }
 static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
 			    enum ov5640_mode mode, enum ov5640_mode orig_mode)
 {
@@ -1376,7 +1392,8 @@ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
 	void *mipi_csi2_info;
 	u32 mipi_reg, msec_wait4stable = 0;
 	enum ov5640_downsize_mode dn_mode, orig_dn_mode;
-
+	printk("hndz ov frame_rate %d mode %d orig mode %d!\n", frame_rate, mode , orig_mode);
+	// dump_stack();
 	if ((mode > ov5640_mode_MAX || mode < ov5640_mode_MIN)
 		&& (mode != ov5640_mode_INIT)) {
 		pr_err("Wrong ov5640 mode detected!\n");
@@ -1506,10 +1523,11 @@ static int ioctl_g_ifparm(struct v4l2_int_device *s, struct v4l2_ifparm *p)
 		pr_err("   ERROR!! no slave device set!\n");
 		return -1;
 	}
-
+	
 	memset(p, 0, sizeof(*p));
 	p->u.bt656.clock_curr = ov5640_data.mclk;
 	pr_debug("   clock_curr=mclk=%d\n", ov5640_data.mclk);
+	printk("hndz clock_curr %d!\n",  ov5640_data.mclk);
 	p->if_type = V4L2_IF_TYPE_BT656;
 	p->u.bt656.mode = V4L2_IF_TYPE_BT656_MODE_NOBT_8BIT;
 	p->u.bt656.clock_min = OV5640_XCLK_MIN;
@@ -1530,7 +1548,7 @@ static int ioctl_g_ifparm(struct v4l2_int_device *s, struct v4l2_ifparm *p)
 static int ioctl_s_power(struct v4l2_int_device *s, int on)
 {
 	struct sensor_data *sensor = s->priv;
-
+	printk("hndz ioctl s power on %d sensor on %d!\n", on, sensor->on);
 	if (on && !sensor->on) {
 		if (io_regulator)
 			if (regulator_enable(io_regulator) != 0)
@@ -1627,6 +1645,7 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 
 	/* Make sure power on */
 	ov5640_standby(0);
+	printk("hndz set para type %d!\n", a->type);
 
 	switch (a->type) {
 	/* This is the only case currently handled. */
@@ -1709,7 +1728,8 @@ static int ioctl_g_fmt_cap(struct v4l2_int_device *s, struct v4l2_format *f)
 	struct sensor_data *sensor = s->priv;
 
 	f->fmt.pix = sensor->pix;
-
+	printk("hndz get pix %d!\n", sensor->pix.height);
+	dump_stack();
 	return 0;
 }
 
@@ -1725,7 +1745,7 @@ static int ioctl_g_fmt_cap(struct v4l2_int_device *s, struct v4l2_format *f)
 static int ioctl_g_ctrl(struct v4l2_int_device *s, struct v4l2_control *vc)
 {
 	int ret = 0;
-
+	printk("hndz ioctl g ctrl id %d!\n", vc->id);
 	switch (vc->id) {
 	case V4L2_CID_BRIGHTNESS:
 		vc->value = ov5640_data.brightness;
@@ -1770,10 +1790,12 @@ static int ioctl_s_ctrl(struct v4l2_int_device *s, struct v4l2_control *vc)
 
 	pr_debug("In ov5640:ioctl_s_ctrl %d\n",
 		 vc->id);
+		printk("hndz In ov5640:ioctl_s_ctrl %d\n",
+		 vc->id);
 
 	switch (vc->id) {
 	case V4L2_CID_FOCUS_AUTO:
-		ov5640_auto_focus();
+		// ov5640_auto_focus();
 		break;
 	case V4L2_CID_BRIGHTNESS:
 		if (vc->value >= 0) {
@@ -1844,8 +1866,13 @@ static int ioctl_s_ctrl(struct v4l2_int_device *s, struct v4l2_control *vc)
 static int ioctl_enum_framesizes(struct v4l2_int_device *s,
 				 struct v4l2_frmsizeenum *fsize)
 {
+	
 	if (fsize->index > ov5640_mode_MAX)
+	{
+		printk("hndz ioctl enum framesizes end!\n");
+		// dump_stack();
 		return -EINVAL;
+	}
 
 	fsize->pixel_format = ov5640_data.pix.pixelformat;
 	fsize->discrete.width =
@@ -1958,6 +1985,8 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
 	ov5640_data.mclk = tgt_xclk;
 
 	pr_debug("   Setting mclk to %d MHz\n", tgt_xclk / 1000000);
+
+	printk("hndz Setting mclk to %d MHz\n", tgt_xclk / 1000000);
 
 	/* Default camera frame rate is set in probe */
 	tgt_fps = sensor->streamcap.timeperframe.denominator /
@@ -2129,9 +2158,9 @@ static int ov5640_probe(struct i2c_client *client,
 
 	ov5640_data.io_init = ov5640_reset;
 	ov5640_data.i2c_client = client;
-	//ov5640_data.pix.pixelformat = V4L2_PIX_FMT_UYVY;
+	ov5640_data.pix.pixelformat = V4L2_PIX_FMT_UYVY;
 	//ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB24;
-	ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB565;
+	// ov5640_data.pix.pixelformat = V4L2_PIX_FMT_RGB565;
 	ov5640_data.pix.width = 640;
 	ov5640_data.pix.height = 480;
 	ov5640_data.streamcap.capability = V4L2_MODE_HIGHQUALITY |
@@ -2140,11 +2169,11 @@ static int ov5640_probe(struct i2c_client *client,
 	ov5640_data.streamcap.timeperframe.denominator = DEFAULT_FPS;
 	ov5640_data.streamcap.timeperframe.numerator = 1;
 
-	ov5640_power_on(dev);
+	// ov5640_power_on(dev);
 
-	ov5640_reset();
+	 ov5640_reset();
 
-	ov5640_standby(0);
+	 ov5640_standby(0);
 
 	retval = ov5640_read_reg(OV5640_CHIP_ID_HIGH_BYTE, &chip_id_high);
 	if (retval < 0 || chip_id_high != 0x56) {
@@ -2158,7 +2187,7 @@ static int ov5640_probe(struct i2c_client *client,
 		clk_disable_unprepare(ov5640_data.sensor_clk);
 		return -ENODEV;
 	}
-
+	printk("hndz read chip id high 0x%x low 0x%x!\n", chip_id_high, chip_id_low);
 	ov5640_standby(1);
 
 	ov5640_int_device.priv = &ov5640_data;
