@@ -209,21 +209,11 @@ static inline void WRITE_FIFO (void *membase, u16 data)
 static inline u16 READ_FIFO (void *membase)
 {
 	 return readw (membase);
-	// return *((u16*)(membase));
-}
-static inline u16 zREAD_FIFO (void *membase)
-{
-	return *(const volatile u16 __force *) (membase);
 }
 
 static inline void WRITE_FIFO (void *membase, u16 data)
 {
 	writew (data, membase);
-}
-static inline void zWRITE_FIFO (void *membase, u16 data)
-{
-// *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)))=*((u16 *)(buf + i));
-	*(volatile u16 __force *)(membase) = data;
 }
 
 #endif
@@ -266,7 +256,11 @@ static int __init etherm_addr(char *addr)
 #define MDIO_MASK		0x0f
 #define MDIO_ENB_IN		0x02
 
-
+/*  
+ *  ======================================================================
+ *   zty sdma相关
+ *  ======================================================================
+ */
 
 #define EIM_CS0_PHY_START_ADDR   0x08000000
 
@@ -279,6 +273,8 @@ static unsigned char * gEIMrxbuf = NULL;
 static unsigned char * gEIMtxbuf = NULL;
 static unsigned int    eim_rx_length;
 static unsigned int    eim_tx_length;
+
+static unsigned long	gdma_start_time;
 
 static struct ax_pkt_hdr grx_frame;
 
@@ -294,1115 +290,8 @@ static void ax_tx_intr (struct net_device *ndev);
 static void ax_tx_err (struct net_device *ndev);
 static void ax_block_output (struct net_device *ndev, int count,  const unsigned char *buf, const int start_page);
 static  int eim_sdma_tx_start(struct net_device *ndev, int count, const unsigned char *buf, const int start_page);
+static int ax88796b_send_data (struct net_device *ndev);
 
-static bool dma_m2m_filter(struct dma_chan *chan, void *param)
-{
-	if (!imx_dma_is_general_purpose(chan))
-		return false;
-	chan->private = param;
-	return true;
-}
-
-
-static inline void eim_sdma_rx_init_config(void)
-{
-	struct dma_slave_config slave_config = {};
-	// memset(&eim_dma_m2m_config, 0x00, sizeof(struct dma_slave_config));
-
-	// gdma_dst = dma_map_single(NULL, gEIMrxbuf, 2048, DMA_DEV_TO_MEM); //map 映射
-
-	slave_config.direction = DMA_MEM_TO_MEM;
-	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
-	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
-	slave_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
-	slave_config.dst_addr = gdma_dst;
-
-	dmaengine_slave_config(dma_m2m_rxchan, &slave_config);
-
-}
-
-static inline void eim_sdma_tx_init_config(void)
-{
-	struct dma_slave_config slave_config = {};
-
-	// gdma_src = dma_map_single(NULL, gEIMtxbuf, 2048, 	DMA_MEM_TO_DEV); //map 映射
-
-	slave_config.direction = DMA_MEM_TO_MEM;
-	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
-	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
-	slave_config.src_addr = gdma_src;
-	slave_config.dst_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
-
-	dmaengine_slave_config(dma_m2m_txchan, &slave_config);
-
-}
-
-static int req_sdma_channel(void)
-{
-	dma_cap_mask_t dma_m2m_mask;
-	struct imx_dma_data m2m_dma_data = {0};
-
-	dma_cap_zero(dma_m2m_mask);
-	dma_cap_set(DMA_SLAVE, dma_m2m_mask);
-	m2m_dma_data.peripheral_type = IMX_DMATYPE_MEMORY;
-	m2m_dma_data.priority = DMA_PRIO_HIGH;
-
-	dma_m2m_rxchan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
-	if (!dma_m2m_rxchan) {
-		printk("Error opening the SDMA memory to memory channel\n");
-		return -EINVAL;
-	}
-	printk("hndz req sdma mem channel is %d!\n", m2m_dma_data.dma_request);
-
-	dma_m2m_txchan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
-	if (!dma_m2m_txchan) {
-		printk("dma_m2m_txchan Error opening the SDMA memory to memory channel\n");
-		return -EINVAL;
-	}
-	else
-	{
-		printk("hndz req dma_m2m_txchan ok!\n");
-	}
-
-	eim_sdma_rx_init_config();
-	eim_sdma_tx_init_config();
-	return 0;
-}
-
-static int eim_sdma_init(struct net_device *ndev)
-{
-	gEIMrxbuf = dma_alloc_coherent(NULL, 2048, &gdma_dst, GFP_KERNEL);
-	// gEIMrxbuf = kzalloc(2048, GFP_DMA);
-	if(!gEIMrxbuf)
-	{
-		printk("hndz eim rx buf alloc error!!!\n");
-		return -1;
-	}
-	gEIMtxbuf = dma_alloc_coherent(NULL, 2048, &gdma_src, GFP_KERNEL);
-	// gEIMtxbuf = kzalloc(2048, GFP_DMA);
-	if(!gEIMtxbuf)
-	{
-		printk("hndz eim tx buf alloc error!!!\n");
-		return -1;
-	}
-	return req_sdma_channel();
-}
-
-static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *ndev)
-{
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-	int send_length;
-
-	u8 ctepr=0, free_pages=0, need_pages;
-
-	send_length = skb->len;
-
-	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-	ax_local->irqlock = 1;
-
-	need_pages = ((send_length - 1) >> 8) + 1;
-
-	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
-
-	if (ctepr & ENCTEPR_TXCQF) {
-		free_pages = 0;
-	} else if (ctepr == 0) {
-
-		/*
-		 * If someone issues STOP bit of command register at run time,
-		 * the TX machine will stop the current transmission and the
-		 * CTEPR register will be reset to zero.
-		 * This is just precautionary measures.
-		 */
-		if (ax_local->tx_prev_ctepr != 0) {
-			ax_local->tx_curr_page = ax_local->tx_start_page;
-			ax_local->tx_prev_ctepr = 0;
-		}
-
-		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
-	}
-	else if (ctepr < ax_local->tx_curr_page - 1) {
-		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
-					ctepr - ax_local->tx_start_page + 1;
-	}
-	else if (ctepr > ax_local->tx_curr_page - 1) {
-		free_pages = ctepr + 1 - ax_local->tx_curr_page;
-	}
-	else if (ctepr == ax_local->tx_curr_page - 1) {
-		if (ax_local->tx_full)
-			free_pages = 0;
-		else
-			free_pages = TX_PAGES;
-	}
-
-
-	if (free_pages < need_pages) {
-		printk("hndz process free_pages < need_pages\n");
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-		ax_local->irqlock = 0;
-		ax_local->tx_skb = NULL;	
-		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-		return NETDEV_TX_BUSY;
-	}
-	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
-	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-	if (free_pages == need_pages) {
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-	}
-	ax_local->tx_prev_ctepr = ctepr;
-	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-		ax_local->tx_stop_page) ? 
-		(ax_local->tx_curr_page + need_pages) : 
-		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-		 + ax_local->tx_start_page);
-
-	ax_local->irqlock = 0;	
-
-
-	gAxRxTx_state = 2;
-	CurrImr = ENISR_TX;
-	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
-	
-
-	// dev_kfree_skb (skb);
-
-	// ndev->trans_start = jiffies;
-	// ax_local->stat.tx_bytes += send_length;
-	return 0;
-}
-
-static int ax88796b_dma_send_data_process (struct sk_buff *skb, struct net_device *ndev)
-{
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-	int send_length;
-
-	u8 ctepr=0, free_pages=0, need_pages;
-
-	send_length = skb->len;
-
-	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-	ax_local->irqlock = 1;
-
-	need_pages = ((send_length - 1) >> 8) + 1;
-
-	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
-
-	if (ctepr & ENCTEPR_TXCQF) {
-		free_pages = 0;
-	} else if (ctepr == 0) {
-
-		/*
-		 * If someone issues STOP bit of command register at run time,
-		 * the TX machine will stop the current transmission and the
-		 * CTEPR register will be reset to zero.
-		 * This is just precautionary measures.
-		 */
-		if (ax_local->tx_prev_ctepr != 0) {
-			ax_local->tx_curr_page = ax_local->tx_start_page;
-			ax_local->tx_prev_ctepr = 0;
-		}
-
-		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
-	}
-	else if (ctepr < ax_local->tx_curr_page - 1) {
-		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
-					ctepr - ax_local->tx_start_page + 1;
-	}
-	else if (ctepr > ax_local->tx_curr_page - 1) {
-		free_pages = ctepr + 1 - ax_local->tx_curr_page;
-	}
-	else if (ctepr == ax_local->tx_curr_page - 1) {
-		if (ax_local->tx_full)
-			free_pages = 0;
-		else
-			free_pages = TX_PAGES;
-	}
-
-	if (free_pages < need_pages) {
-		printk("hndz  dma process free_pages < need_pages\n");
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-		ax_local->irqlock = 0;	
-		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-		return NETDEV_TX_BUSY;
-	}
-
-	eim_sdma_tx_start (ndev, send_length, skb->data, ax_local->tx_curr_page);
-	gctepr= ctepr;
-	gfree_pages = free_pages;
-	gneed_pages = need_pages;
-	return 0;
-}
-
-static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local);
-
-static int gRxNumcount = 0;
-//DMA回调函数
-static void dma_m2m_rx_callback(void *data)
-{
-	int i = 0;
-	unsigned long flags;
-	unsigned char rxing_page, this_frame, next_frame;
-	struct net_device *ndev = (struct net_device *)data;
-	u8 cmd;
-	struct ax_device *ax_local = ax_get_priv (ndev);
-
-	int pkt_len = eim_rx_length;
-
-	struct sk_buff *skb;
-	struct sk_buff *txskb;
-	int status;
-
-	void *ax_base = ax_local->membase;
-
-	if(ndev == NULL)
-	{
-		printk("zty callback data error!\n");
-		return ;
-	}
-
-	if(gAxStop == 1)
-	{
-		gAxRxTx_state = 0;
-		return ;
-	}
-
-	spin_lock_irqsave (&ax_local->page_lock, flags);
-
-	skb = dev_alloc_skb (pkt_len + 2);
-	if (skb == NULL) {
-		printk(" Couldn't allocate a sk_buff"
-			" of size %d.\n", pkt_len);
-		ax_local->stat.rx_dropped++;
-
-		spin_unlock_irqrestore (&ax_local->page_lock, flags);
-		
-		return;
-	}
-
-	/* IP headers on 16 byte boundaries */
-	skb_reserve (skb, 2);
-	skb->dev = ndev;
-	skb_put (skb, pkt_len);
-	memcpy(skb->data, gEIMrxbuf, eim_rx_length);	
-	// dma_unmap_single(NULL, dma_dst, 2048, DMA_DEV_TO_MEM);
-	skb->protocol = eth_type_trans (skb,ndev);
-
-	skb_queue_tail(&ax_local->skb_queue, skb);
-	// status = netif_rx_ni(skb);
-	// if (status != NET_RX_SUCCESS)
-	// {
-	// 	printk("hndz ax recv error status 0x%x!\n", status);
-	// }
-
-	ndev->last_rx = jiffies;
-	ax_local->stat.rx_packets++;
-	ax_local->stat.rx_bytes += pkt_len;
-	if (grx_frame.status & ENRSR_PHY)
-	{
-		ax_local->stat.multicast++;
-		ax_local->boardcast_num++;
-	}
-
-
-	gRxNumcount++;
- 	
-   
-	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
-	ax_local->dmaing = 0;
-
-	next_frame = grx_frame.next;
-
-	ax_local->current_page = next_frame;
-	writeb (next_frame-1, ax_base + ADDR_SHIFT16(EN0_BOUNDARY));
-
-	if(gRxNumcount < 6)
-	{
-		rxing_page = readb (ax_base + ADDR_SHIFT16(EN0_CURPAG));
-
-		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
-		if (this_frame >= ax_local->stop_page)
-			this_frame = ax_local->rx_start_page;
-		
-		if (this_frame == rxing_page) {	/* Read all the frames? */
-			gAxRxTx_state = 0;
-			ax_local->irqlock 	 = 0;
-			gRxNumcount = 0;
-
-			cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
-			writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
-
-			CurrImr = ENISR_ALL;
-			writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-			
-		}
-		else
-		{
-			 if(ax88796b_sdma_rx_poll(ndev, ax_local) != 1)
-			 {
-
-				gAxRxTx_state = 0;
-				ax_local->irqlock 	 = 0;
-				gRxNumcount = 0;
-
-				cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
-				writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
-
-				writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-				printk("hndz call back rx error!\n");
-				gRxNumcount = 0;
-			 }
-			 else
-			 {
-				i = 1;
-			 }
-		}
-	}
-
-	if(i == 0)
-	{
-		napi_schedule(&ax_local->napi);
-		if(ax_local->tx_skb != NULL)
-		{
-			if(skb->len > 64)
-				status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
-			else
-			{
-			 	status = ax88796b_send_data_process(ax_local->tx_skb, ndev);
-				if(status != 0)
-					printk("hndz call send ret is 0x%x!\n", status);
-				txskb = ax_local->tx_skb;
-				ax_local->tx_skb = NULL;
-				spin_unlock_irqrestore (&ax_local->page_lock, flags);
-				dev_kfree_skb (txskb);
-
-				ndev->trans_start = jiffies;
-				ax_local->stat.tx_bytes += skb->len ;
-				return ;
-			}
-			// status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
-			
-			if(status != 0)
-				printk("hndz call send ret is 0x%x!\n", status);
-		}
-	}
-
-	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	
-	
-	return ;
-}
-
-static void dma_m2m_tx_callback(void *data)
-{
-	// int i = 0;
-	unsigned long flags;
-	struct sk_buff  * skb;
-	struct net_device *ndev = (struct net_device *)data;
-
-	
-	struct ax_device *ax_local = ax_get_priv (ndev);
-
-	void *ax_base = ax_local->membase;
-
-	// if(ndev == NULL)
-	// {
-	// 	printk("zty callback data error!\n");
-	// 	return ;
-	// }
-
-	// dma_unmap_single(NULL, gdma_src, 2048, DMA_MEM_TO_DEV);
-	if(gAxStop == 1)
-	{
-		gAxRxTx_state = 0;
-		return ;
-	}
-	
-	spin_lock_irqsave (&ax_local->page_lock, flags);
-	skb = ax_local->tx_skb;
-	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-	// cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
-	// printk("hndz cmd is 0x%x!\n", cmd);
-
-	// while ((readb(ax_base + ADDR_SHIFT16(EN0_ISR)) & 0x40) == 0)
-	// {
-	// 	i++;
-	// 	if(i >= 0x00000f00)
-	// 	{
-	// 		printk("hndz tx dma time over!\n");
-	// 		// ax_local->dmaing = 0;
-	// 		// return -5;
-	// 		break;
-	// 	}
-	// }
-
-	// if ((readb(ax_base + ADDR_SHIFT16(EN0_ISR)) & 0x40) == 0) {
-
-	// 		printk ("hndz timeout waiting for Tx RDC.\n");
-	// }
-		// else
-		// 	printk("zty write ok!\n");
-	
-	// writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
-
-	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
-
-	ax_local->dmaing = 0;
-
-	ax_trigger_send (ndev, eim_tx_length, ax_local->tx_curr_page);
-
-	if (gfree_pages == gneed_pages) {
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-	}
-	ax_local->tx_prev_ctepr = gctepr;
-	ax_local->tx_curr_page = ((ax_local->tx_curr_page + gneed_pages) <
-		ax_local->tx_stop_page) ? 
-		(ax_local->tx_curr_page + gneed_pages) : 
-		(gneed_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-			+ ax_local->tx_start_page);
-
-	ax_local->irqlock = 0;	
-
-	ax_local->tx_skb = NULL;
-
-	gAxRxTx_state = 2;
-	CurrImr = ENISR_TX;
-	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
-	
-	
-
-	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	dev_kfree_skb (skb);
-
-
-	
-
-	ndev->trans_start = jiffies;
-	ax_local->stat.tx_bytes += eim_tx_length;
-	
-	
-	return ;
-}
-
-
-
-static  int eim_sdma_tx_start(struct net_device *ndev, int count, const unsigned char *buf, const int start_page)
-{
-
-	// int ret = 0;
-	// int ring_offset;
-	// uint32_t i = 0;
-	struct dma_async_tx_descriptor *dma_m2m_desc;
-	unsigned int size;
-
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-
-	// gtime1 = hndz_read_current_timer();
-	memcpy(gEIMtxbuf, buf, count);
-
-	eim_tx_length = count;
-	
-	 size = (eim_tx_length +4) & 0x7FE;
-	// size = count;
-
-	
-	// if(size > 2048)
-	// {
-	// 	printk("hndz net rec %d data too long!\n", size);
-	// 	ret = -1;
-	// 	return ret;
-	// }
-
-	// eim_sdma_tx_init_config();
-
-		/* This shouldn't happen. If it does, it's the last thing you'll see */
-	if (ax_local->dmaing)
-	{
-		printk ("hndz DMAing conflict in ne_block_output."
-			"[DMAstat:%d][irqlock:%d]\n",
-			ax_local->dmaing, ax_local->irqlock);
-		
-		return -2;
-	}
-
-	ax_local->dmaing |= 0x01;
-
-	// printk("hndz write %d!\n", size);
-
-
-
-		/* Now the normal output. */
-	writeb (size & 0xff, ax_base + ADDR_SHIFT16(EN0_RCNTLO));
-	writeb (size >> 8,   ax_base + ADDR_SHIFT16(EN0_RCNTHI));
-	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RSARLO));
-	writeb (start_page, ax_base + ADDR_SHIFT16(EN0_RSARHI));
-
-	writeb (E8390_RWRITE, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-	dma_m2m_desc = dma_m2m_txchan->device->device_prep_dma_memcpy(dma_m2m_txchan,
-	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  gdma_src, size, DMA_MEM_TO_MEM);													
-	if (!dma_m2m_desc)
-	{
-		ax_local->dmaing = 0;
-		printk("tx prep error!!\n");
-		return -4;
-	}
-
-
-	
-	//设置dma传输完成后的回调函数	
-	dma_m2m_desc->callback = dma_m2m_tx_callback;
-	dma_m2m_desc->callback_param = (void *)ndev;
-	// printk("zty eim submit start 0x%lx!\n", jiffies);
-
-
-	// printk("hndz eno sr 0x%x!\n", readb (ax_base + ADDR_SHIFT16(EN0_SR)));
-
-	gAxRxTx_state = 2;
-	ax_local->irqlock  = 1;
-
-	dmaengine_submit(dma_m2m_desc);
-	dma_async_issue_pending(dma_m2m_txchan);
-	// gtime2 = hndz_read_current_timer();
-	// printk("hndz tx 1 %lu!\n", gtime2 - gtime1);
-
-		/* Now the normal output. */
-
-
-	return 0;	
-}
-
-static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, struct net_device * ndev)
-{
-
-	int ret = 0;
-	int ring_offset;
-	uint32_t i = 0;
-	struct dma_async_tx_descriptor *dma_m2m_desc;
-	unsigned int count;
-	// struct net_device *ndev = (struct net_device *)data;
-
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-
-	eim_rx_length = size;
-	ring_offset = current_offset;	
-	count = (eim_rx_length + 4) & 0x7FE;
-
-	
-	if(size > 2048)
-	{
-		printk("hndz net rec %d data too long!\n", size);
-		ret = -1;
-		return ret;
-	}
-
-
-	if (ax_local->dmaing)
-	{
-		printk ("hndz DMAing conflict in ne_block_input "
-			"[DMAstat:%d][irqlock:%d].\n",
-			ax_local->dmaing, ax_local->irqlock);
-		return -3;
-	}
-
-	ax_local->dmaing |= 0x01;
-
-	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-	writeb (count & 0xff, ax_base + ADDR_SHIFT16(EN0_RCNTLO));
-	writeb (count >> 8, ax_base + ADDR_SHIFT16(EN0_RCNTHI));
-	writeb (ring_offset & 0xff, ax_base + ADDR_SHIFT16(EN0_RSARLO));
-	writeb (ring_offset >> 8, ax_base + ADDR_SHIFT16(EN0_RSARHI));
-	writeb (E8390_RREAD, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-
-	// eim_sdma_rx_init_config();
-
-	dma_m2m_desc = dma_m2m_rxchan->device->device_prep_dma_memcpy(dma_m2m_rxchan, gdma_dst,
-	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_MEM_TO_MEM);													
-	if (!dma_m2m_desc)
-	{
-		ax_local->dmaing = 0;
-		printk("rx prep error!!\n");
-		return -4;
-	}
-	
-	//设置dma传输完成后的回调函数	
-	dma_m2m_desc->callback = dma_m2m_rx_callback;
-	dma_m2m_desc->callback_param = (void *)ndev;
-	// printk("zty eim submit start 0x%lx!\n", jiffies);
-
-	while ((readb (ax_base + ADDR_SHIFT16(EN0_SR)) & ENSR_DMA_READY) == 0)
-	{
-		i++;
-		if(i >= 0x0F000000)
-		{
-			printk("hndz ax dma time over!\n");
-			ax_local->dmaing = 0;
-			return -5;
-		}
-	}
-
-	gAxRxTx_state = 1;
-	ax_local->irqlock  = 1;
-	gRxNumcount = 0;
-
-	dmaengine_submit(dma_m2m_desc);
-	dma_async_issue_pending(dma_m2m_rxchan);
-	return 0;	
-}
-
-static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local)
-{
-	void *ax_base = ax_local->membase;
-	unsigned char rxing_page, this_frame, next_frame;
-	unsigned short current_offset;
-	// struct ax_pkt_hdr rx_frame;
-	int ret = 0;
-
-	if(netif_running(ndev)) 
-	{
-
-		int pkt_len, pkt_stat;
-
-		/* Get the rx page (incoming packet pointer). */
-		rxing_page = readb (ax_base + ADDR_SHIFT16(EN0_CURPAG));
-
-		/* 
-		 * Remove one frame from the ring.
-		 * Boundary is always a page behind.
-		 */
-		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
-
-		if (this_frame >= ax_local->stop_page)
-			this_frame = ax_local->rx_start_page;
-		
-		if (this_frame == rxing_page) {	/* Read all the frames? */
-			return 0;			/* Done for now */
-		}
-		current_offset = this_frame << 8;
-		ax88796b_get_hdr (ndev, &grx_frame, this_frame);
-
-
-		pkt_len = grx_frame.count - sizeof (struct ax_pkt_hdr);
-		pkt_stat = grx_frame.status;
-		next_frame = this_frame + 1 + ((pkt_len + 4) >> 8);
-
-		if (pkt_len < 60  ||  pkt_len > 1518) {
-			PRINTK (ERROR_MSG, PFX
-				" bogus pkt size: %d, status=%#2x nxpg=%#2x.\n",
-				grx_frame.count, grx_frame.status, grx_frame.next);
-			ax_local->stat.rx_errors++;
-			ax_local->stat.rx_length_errors++;
-		} else if ((pkt_stat & 0x0F) == ENRSR_RXOK) {
-			if(eim_sdma_rx_start(pkt_len, current_offset + sizeof (grx_frame), ndev) == 0)
-			{
-				ret = 1;
-				return 1;
-			}
-			else
-			{
-				printk("hndz ax rx error!\n");
-			}
-			
-			
-		} else {
-			PRINTK (ERROR_MSG, PFX
-				" bogus packet: status=%#2x"
-				" nxpg=%#2x size=%d\n",
-				grx_frame.status, grx_frame.next, grx_frame.count);
-			ax_local->stat.rx_errors++;
-			/* NB: The NIC counts CRC, frame and missed errors. */
-			if (pkt_stat & ENRSR_FO)
-				ax_local->stat.rx_fifo_errors++;
-		}
-		next_frame = grx_frame.next;
-
-		ax_local->current_page = next_frame;
-		writeb (next_frame-1, ax_base + ADDR_SHIFT16(EN0_BOUNDARY));
-
-	}
-	else
-	{
-		printk("hndz netif_running no runing!\n");
-	}
-
-	return ret;
-}
-
-// static int ax88796b_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev)
-// {
-// 	struct ax_device *ax_local = ax_get_priv (ndev);
-// 	void *ax_base = ax_local->membase;
-// 	int send_length;
-// 	unsigned long flags;
-// 	u8 ctepr=0, free_pages=0, need_pages;
-
-// 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
-
-// 	send_length = skb->len;
-
-// 	spin_lock_irqsave (&ax_local->page_lock, flags);
-
-// 	if (ax_local->tx_skb) {
-// 		printk("hndz ax hard_xmit called while tx busy\n");
-// 		spin_unlock_irqrestore(&ax_local->page_lock, flags);
-// 		return NETDEV_TX_BUSY;
-// 	}
-// 	netif_stop_queue (ndev);
-// 	ax_local->tx_skb = skb;
-// 	if(gAxRxTx_state != 0)
-// 	{
-// 		spin_unlock_irqrestore(&ax_local->page_lock, flags);
-// 		return NETDEV_TX_OK;
-// 	}
-	
-
-// 	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-// 	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-// 	ax_local->irqlock = 1;
-
-// 	need_pages = ((send_length - 1) >> 8) + 1;
-
-// 	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
-
-// 	if (ctepr & ENCTEPR_TXCQF) {
-// 		free_pages = 0;
-// 	} else if (ctepr == 0) {
-
-// 		/*
-// 		 * If someone issues STOP bit of command register at run time,
-// 		 * the TX machine will stop the current transmission and the
-// 		 * CTEPR register will be reset to zero.
-// 		 * This is just precautionary measures.
-// 		 */
-// 		if (ax_local->tx_prev_ctepr != 0) {
-// 			ax_local->tx_curr_page = ax_local->tx_start_page;
-// 			ax_local->tx_prev_ctepr = 0;
-// 		}
-
-// 		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
-// 	}
-// 	else if (ctepr < ax_local->tx_curr_page - 1) {
-// 		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
-// 					ctepr - ax_local->tx_start_page + 1;
-// 	}
-// 	else if (ctepr > ax_local->tx_curr_page - 1) {
-// 		free_pages = ctepr + 1 - ax_local->tx_curr_page;
-// 	}
-// 	else if (ctepr == ax_local->tx_curr_page - 1) {
-// 		if (ax_local->tx_full)
-// 			free_pages = 0;
-// 		else
-// 			free_pages = TX_PAGES;
-// 	}
-
-// 	if (free_pages < need_pages) {
-// 		printk("hndz free_pages < need_pages\n");
-// 		netif_stop_queue (ndev);
-// 		ax_local->tx_full = 1;
-// 		ax_local->irqlock = 0;	
-// 		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-// 		spin_unlock_irqrestore (&ax_local->page_lock, flags);
-// 		return NETDEV_TX_BUSY;
-// 	}
-
-// 	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
-// 	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-// 	if (free_pages == need_pages) {
-// 		netif_stop_queue (ndev);
-// 		ax_local->tx_full = 1;
-// 	}
-// 	ax_local->tx_prev_ctepr = ctepr;
-// 	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-// 		ax_local->tx_stop_page) ? 
-// 		(ax_local->tx_curr_page + need_pages) : 
-// 		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-// 		 + ax_local->tx_start_page);
-
-// 	ax_local->irqlock = 0;	
-// 	ax_local->tx_skb = NULL;
-
-// 	gAxRxTx_state = 2;
-// 	CurrImr = ENISR_TX;
-// 	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
-	
-// 	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-
-
-// 	dev_kfree_skb (skb);
-
-// 	ndev->trans_start = jiffies;
-// 	ax_local->stat.tx_bytes += send_length;
-
-// 	return NETDEV_TX_OK;
-// }
-
-
-static int ax88796b_eim_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev)
-{
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-	int send_length;
-	unsigned long flags;
-	u8 ctepr=0, free_pages=0, need_pages;
-
-
-	if(gAxStop == 1)
-		return NETDEV_TX_BUSY;
-	send_length = skb->len;
-
-	spin_lock_irqsave (&ax_local->page_lock, flags);
-
-	if (ax_local->tx_skb) {
-		printk("hndz ax hard_xmit called while tx busy\n");
-		spin_unlock_irqrestore(&ax_local->page_lock, flags);
-		return NETDEV_TX_BUSY;
-	}
-	netif_stop_queue (ndev);
-	ax_local->tx_skb = skb;
-	if(gAxRxTx_state != 0)
-	{
-		spin_unlock_irqrestore(&ax_local->page_lock, flags);
-		return NETDEV_TX_OK;
-	}
-	
-
-	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-	ax_local->irqlock = 1;
-
-	need_pages = ((send_length - 1) >> 8) + 1;
-
-	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
-
-	if (ctepr & ENCTEPR_TXCQF) {
-		free_pages = 0;
-	} else if (ctepr == 0) {
-
-		/*
-		 * If someone issues STOP bit of command register at run time,
-		 * the TX machine will stop the current transmission and the
-		 * CTEPR register will be reset to zero.
-		 * This is just precautionary measures.
-		 */
-		if (ax_local->tx_prev_ctepr != 0) {
-			ax_local->tx_curr_page = ax_local->tx_start_page;
-			ax_local->tx_prev_ctepr = 0;
-		}
-
-		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
-	}
-	else if (ctepr < ax_local->tx_curr_page - 1) {
-		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
-					ctepr - ax_local->tx_start_page + 1;
-	}
-	else if (ctepr > ax_local->tx_curr_page - 1) {
-		free_pages = ctepr + 1 - ax_local->tx_curr_page;
-	}
-	else if (ctepr == ax_local->tx_curr_page - 1) {
-		if (ax_local->tx_full)
-			free_pages = 0;
-		else
-			free_pages = TX_PAGES;
-	}
-
-	if (free_pages < need_pages) {
-		printk("hndz free_pages < need_pages\n");
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-		ax_local->irqlock = 0;	
-		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-		spin_unlock_irqrestore (&ax_local->page_lock, flags);
-		return NETDEV_TX_BUSY;
-	}
-
-	if(send_length > 64)
-	{
-		eim_sdma_tx_start (ndev, send_length, skb->data, ax_local->tx_curr_page);
-		gctepr= ctepr;
-		gfree_pages = free_pages;
-		gneed_pages = need_pages;
-		spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	}
-	else
-	{
-		//  gtime1 = hndz_read_current_timer();
-		ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
-		ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-		if (free_pages == need_pages) {
-			netif_stop_queue (ndev);
-			ax_local->tx_full = 1;
-		}
-		ax_local->tx_prev_ctepr = ctepr;
-		ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-			ax_local->tx_stop_page) ? 
-			(ax_local->tx_curr_page + need_pages) : 
-			(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-			+ ax_local->tx_start_page);
-
-		ax_local->irqlock = 0;	
-		ax_local->tx_skb = NULL;
-
-		gAxRxTx_state = 2;
-		CurrImr = ENISR_TX;
-		writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
-		spin_unlock_irqrestore (&ax_local->page_lock, flags);
-		//  gtime2 = hndz_read_current_timer();
-		dev_kfree_skb (skb);
-
-		ndev->trans_start = jiffies;
-		ax_local->stat.tx_bytes += send_length;
-		// printk("hndz tx %lu!\n", gtime2 - gtime1);
-	}
-	
-	
-
-
-
-
-	return NETDEV_TX_OK;
-}
-
-static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
-{
-	struct net_device *ndev = dev_id;
-	int interrupts;
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-	u8 cmd;
-	// u8 CurrImr;
-
-	if (ndev == NULL) 
-	{
-		PRINTK (ERROR_MSG,
-			"net_interrupt(): irq %d for unknown device.\n", irq);
-		return IRQ_RETVAL (0);
-	}
-	if(gAxStop == 1)
-		return IRQ_RETVAL (1);
-
-	spin_lock (&ax_local->page_lock);
-	if(gAxRxTx_state == 0)
-	{
-		
-		writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-		CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
-
-		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-		writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-
-
-		if (ax_local->irqlock) {
-			printk ("Interrupt occurred when irqlock locked\n");
-			spin_unlock (&ax_local->page_lock);
-			return IRQ_RETVAL (0);
-		}
-	
-		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) != 0)
-		{
-			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
-
-			if (interrupts & ENISR_TX) {
-
-				ax_tx_intr (ndev);
-				CurrImr = ENISR_ALL;			
-			}
-
-			if (interrupts & (ENISR_RX | ENISR_RX_ERR | ENISR_OVER)) {
-				if(ax88796b_sdma_rx_poll(ndev, ax_local) == 1)
-				{
-					CurrImr = 0;
-				}
-				else
-				{
-					CurrImr = ENISR_ALL;
-					cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
-					writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
-					
-				}			
-				
-			}
-
-			if (interrupts & ENISR_TX_ERR) {
-				PRINTK (INT_MSG, PFX " TX err int\n");
-				ax_tx_err (ndev);
-			}
-
-			if (interrupts & ENISR_COUNTERS) {   
-				ax_local->stat.rx_frame_errors += 
-						readb (ax_base + ADDR_SHIFT16(EN0_COUNTER0));
-				ax_local->stat.rx_crc_errors += 
-						readb (ax_base + ADDR_SHIFT16(EN0_COUNTER1));
-				ax_local->stat.rx_missed_errors += 
-						readb (ax_base + ADDR_SHIFT16(EN0_COUNTER2));
-				writeb (ENISR_COUNTERS, ax_base + ADDR_SHIFT16(EN0_ISR));
-			}
-
-			if (interrupts & ENISR_RDC)
-				writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
-		}
-		writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-	}
-	else if (gAxRxTx_state == 2)
-	{		
-		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) != 0)
-		{
-			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR));
-			if (interrupts & ENISR_TX) 
-			{
-				ax_tx_intr (ndev);
-
-				gAxRxTx_state = 0;
-				
-				CurrImr = 0;
-				writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-				if(ax88796b_sdma_rx_poll(ndev, ax_local) != 1)
-				{
-					CurrImr = ENISR_ALL;
-					writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-				}
-				
-			}
-			else
-			{
-				if (!(interrupts & (ENISR_RX))){
-					printk("hndz tx rx inter error 0x%x!\n", interrupts);
-				}
-				
-			}
-
-		}
-		else
-		{
-			printk("hndz tx error!\n");
-		}
-
-	}
-	else
-	{
-		;
-	}
-
-	spin_unlock (&ax_local->page_lock);
-
-	return IRQ_RETVAL (1);
-}
 
 /*
  * ----------------------------------------------------------------------------
@@ -1756,6 +645,118 @@ static void ax88796b_dump_phy_regs (struct ax_device *ax_local)
 			mdio_read (ax_local->ndev, 0x10, i));
 	}
 }
+/*
+ * ----------------------------------------------------------------------------
+ * Function Name: sdma start
+ * Purpose: 
+ * ----------------------------------------------------------------------------
+ */
+static bool dma_m2m_filter(struct dma_chan *chan, void *param)
+{
+	if (!imx_dma_is_general_purpose(chan))
+		return false;
+	chan->private = param;
+	return true;
+}
+
+static inline void ax88796_info_init(void)
+{
+	gAxRxTx_state = 0;
+	gAxStop = 0;
+	CurrImr = 0;
+}
+
+static inline void eim_sdma_rx_init_config(void)
+{
+	struct dma_slave_config slave_config = {};
+	// memset(&eim_dma_m2m_config, 0x00, sizeof(struct dma_slave_config));
+
+	// gdma_dst = dma_map_single(NULL, gEIMrxbuf, 2048, DMA_DEV_TO_MEM); //map 映射
+
+	slave_config.direction = DMA_MEM_TO_MEM;
+	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	slave_config.src_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+	slave_config.dst_addr = gdma_dst;
+
+	dmaengine_slave_config(dma_m2m_rxchan, &slave_config);
+
+}
+
+static inline void eim_sdma_tx_init_config(void)
+{
+	struct dma_slave_config slave_config = {};
+
+	// gdma_src = dma_map_single(NULL, gEIMtxbuf, 2048, 	DMA_MEM_TO_DEV); //map 映射
+
+	slave_config.direction = DMA_MEM_TO_MEM;
+	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_2_BYTES;
+	slave_config.src_addr = gdma_src;
+	slave_config.dst_addr = (EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT));
+
+	dmaengine_slave_config(dma_m2m_txchan, &slave_config);
+
+}
+
+static int req_sdma_channel(void)
+{
+	dma_cap_mask_t dma_m2m_mask;
+	struct imx_dma_data m2m_dma_data = {0};
+
+	dma_cap_zero(dma_m2m_mask);
+	dma_cap_set(DMA_SLAVE, dma_m2m_mask);
+	m2m_dma_data.peripheral_type = IMX_DMATYPE_MEMORY;
+	m2m_dma_data.priority = DMA_PRIO_HIGH;
+
+	dma_m2m_rxchan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
+	if (!dma_m2m_rxchan) {
+		printk("Error opening the SDMA memory to memory channel\n");
+		return -EINVAL;
+	}
+	printk("hndz req sdma mem channel is %d!\n", m2m_dma_data.dma_request);
+
+	dma_m2m_txchan = dma_request_channel(dma_m2m_mask, dma_m2m_filter, &m2m_dma_data);
+	if (!dma_m2m_txchan) {
+		printk("dma_m2m_txchan Error opening the SDMA memory to memory channel\n");
+		return -EINVAL;
+	}
+	else
+	{
+		printk("hndz req dma_m2m_txchan ok!\n");
+	}
+
+	eim_sdma_rx_init_config();
+	eim_sdma_tx_init_config();
+	return 0;
+}
+
+static int eim_sdma_init(struct net_device *ndev)
+{
+	gEIMrxbuf = dma_alloc_coherent(NULL, 2048, &gdma_dst, GFP_KERNEL);
+	// gEIMrxbuf = kzalloc(2048, GFP_DMA);
+	if(!gEIMrxbuf)
+	{
+		printk("hndz eim rx buf alloc error!!!\n");
+		return -1;
+	}
+	gEIMtxbuf = dma_alloc_coherent(NULL, 2048, &gdma_src, GFP_KERNEL);
+	// gEIMtxbuf = kzalloc(2048, GFP_DMA);
+	if(!gEIMtxbuf)
+	{
+		printk("hndz eim tx buf alloc error!!!\n");
+		return -1;
+	}
+	return req_sdma_channel();
+}
+
+
+
+
+
+
+
+
 
 
 
@@ -1766,30 +767,13 @@ void get_ip_addr(struct net_device *ndev, char * address)
 {
 	struct in_device * ip = ndev->ip_ptr;
 	struct in_ifaddr *in;
-//	unsigned char address[4];
+
 	if (ip == NULL) return;
 	in = ip->ifa_list;
 	if(in != NULL)
 	{
 		memcpy(address, &in->ifa_address, 4);
 	}
-	// printk("ip is %d.%d.%d.%d !\n", address[0], address[1],address[2],address[3]);
-
-	// printk("mac is %x:%x:%x:%x:%x:%x !\n", ndev->dev_addr[0], ndev->dev_addr[1],ndev->dev_addr[2],
-	//                           ndev->dev_addr[3], ndev->dev_addr[4],ndev->dev_addr[5]);
-
-	// 	struct net_device *dev = ndev;
-	// struct in_device *ip = dev->ip_ptr;
-	// struct in_ifaddr *in;
-	// unsigned char address[4], netmask[4];
-
-	// if (ip == NULL) return;
-	// in = ip->ifa_list;
-	// while (in != NULL) {
-	// 	memcpy(address, &in->ifa_address, sizeof(address));
-	// 	memcpy(netmask, &in->ifa_mask, sizeof(netmask));
-	// 	in = in->ifa_next;
-	// }
 }
 static int ax88796b_send_data (struct net_device *ndev)
 {
@@ -1804,8 +788,6 @@ static int ax88796b_send_data (struct net_device *ndev)
 	char initdata[10] = {0x08, 0x06, 0x00, 0x01, 0x08, 0x00, 0x06, 0x04,0x00, 0x02
 	                    };
 
-//	printk("zty send !\n");
-	
 	for(i = 0; i < 6; i++)
 	{
 		ginitbuf[i] = 0xff;
@@ -1875,7 +857,6 @@ static int ax88796b_send_data (struct net_device *ndev)
 
 	// ax_block_dma_output(ndev, send_length, ginitbuf, ax_local->tx_curr_page);
 	ax_block_output (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
-	// printk("hndz ax_local->tx_curr_page %d!\n", ax_local->tx_curr_page);
 	// eim_sdma_tx_start (ndev, send_length, ginitbuf, ax_local->tx_curr_page);
 	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
 	if (free_pages == need_pages) {
@@ -1892,7 +873,10 @@ static int ax88796b_send_data (struct net_device *ndev)
 	ax_local->irqlock = 0;	
 	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
 
-	 spin_unlock_irqrestore (&ax_local->page_lock, flags);
+	gdma_start_time = jiffies;
+	gAxRxTx_state = 2;
+
+	spin_unlock_irqrestore (&ax_local->page_lock, flags);
 
 
 	ndev->trans_start = jiffies;
@@ -2039,43 +1023,6 @@ struct ethtool_ops ax88796b_ethtool_ops = {
 #define BM_OCOTP_CTRL_BUSY		0x00000100
 
 
-// static void set_otp_timing(void* otp_base, struct clk *otp_clk)
-// {
-// 	unsigned long clk_rate = 0;
-// 	unsigned long strobe_read, relex, strobe_prog;
-// 	u32 timing = 0;
-
-// 	clk_rate = clk_get_rate(otp_clk);
-
-// 	/* do optimization for too many zeros */
-// 	relex = clk_rate / (1000000000 / 20) - 1;
-// 	strobe_prog = clk_rate / (1000000000 / 10000) + 2 * (20 + 1) - 1;
-// 	strobe_read = clk_rate / (1000000000 / 40) + 2 * (20 + 1) - 1;
-
-// 	timing = BF(relex, OCOTP_TIMING_RELAX);
-// 	timing |= BF(strobe_read, OCOTP_TIMING_STROBE_READ);
-// 	timing |= BF(strobe_prog, OCOTP_TIMING_STROBE_PROG);
-
-// 	__raw_writel(timing, otp_base + HW_OCOTP_TIMING);
-// }
-
-// static int otp_wait_busy(u32 flags, void* otp_base, struct clk *otp_clk)
-// {
-// 	int count;
-// 	u32 c;
-
-// 	for (count = 10000; count >= 0; count--) {
-// 		c = __raw_readl(otp_base + HW_OCOTP_CTRL);
-// 		if (!(c & (BM_OCOTP_CTRL_BUSY | BM_OCOTP_CTRL_ERROR | flags)))
-// 			break;
-// 		cpu_relax();
-// 	}
-
-// 	if (count < 0)
-// 		return -ETIMEDOUT;
-
-// 	return 0;
-// }
 
 /*
  * ----------------------------------------------------------------------------
@@ -2084,88 +1031,14 @@ struct ethtool_ops ax88796b_ethtool_ops = {
  * ----------------------------------------------------------------------------
  */
  
-ssize_t ds2460_read_generic(u8 *buf, loff_t addr, unsigned len);
 static void ax88796b_load_macaddr (struct net_device *ndev, unsigned char *pMac)
 {
-	// struct device_node *np = NULL;
-	// struct clk *otp_clk;
-	// void __iomem *otp_base;
-	// struct resource res;
-	// int ret;
-	// u32 value = 0;
-
-	// np = of_find_compatible_node(NULL, NULL, "fsl,imx6q-ocotp");
-	// ret=of_address_to_resource(np, 0, &res);
-	// otp_base=ioremap(res.start,0x4000);
-	// otp_clk = of_clk_get(np, 0);
-	// if (IS_ERR(otp_clk)) {
-	// 	printk( "wwwwwww of_clk_get_by_name xxxxxxx\n");
-	// }
-
-	// ret = clk_prepare_enable(otp_clk);
-	// if (ret)
-	// 	printk("clk_prepare_enable xxxxxxxx\n");
-
-	// set_otp_timing(otp_base, otp_clk);
-	// ret = otp_wait_busy(0, otp_base, otp_clk);
-	// if (ret)
-	// 	printk("otp_wait_busy xxxxxxxx\n");
-
-	// value = __raw_readl(otp_base + HW_OCOTP_CUST_N(34));
-	// pMac[2]=value>>24;
-	// pMac[3]=value>>16;
-	// pMac[4]=value>>8;
-	// pMac[5]=value;
-	// value = __raw_readl(otp_base + HW_OCOTP_CUST_N(35));
-	// pMac[0]=value>>8;
-	// pMac[1]=value;
-	// clk_disable_unprepare(otp_clk);
-
-#if 0
-	struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-	int i;
-	struct {unsigned char value, offset; } program_seq[] =
-	{
-		{E8390_NODMA | E8390_PAGE0 | E8390_STOP, E8390_CMD},
-		{ax_local->bus_width, EN0_DCFG},
-		{0x00, EN0_RCNTLO},
-		{0x00, EN0_RCNTHI},
-		{0x00, EN0_IMR},
-		{0xFF, EN0_ISR},
-		{E8390_RXOFF, EN0_RXCR},
-		{E8390_TXOFF, EN0_TXCR},
-		{0x0C, EN0_RCNTLO},
-		{0x00, EN0_RCNTHI},
-		{0x00, EN0_RSARLO},
-		{0x00, EN0_RSARHI},
-		{E8390_RREAD | E8390_START, E8390_CMD},
-	};
-
-	/* Read the 12 bytes of station address PROM. */
-	for (i = 0; i < sizeof (program_seq)/sizeof (program_seq[0]); i++)
-		writeb (program_seq[i].value, ax_base + program_seq[i].offset);
-
-	while (( readb (ax_base + EN0_SR) & 0x20) == 0);
-
-	for (i = 0; i < 6; i++)
-		pMac[i] = (unsigned char) READ_FIFO (ax_base + EN0_DATAPORT);
-
-	writeb (ENISR_RDC, ax_base + EN0_ISR);	/* Ack intr. */
-
-	/* Support for No EEPROM */
-	if (!is_valid_ether_addr (pMac)) {
-		PRINTK (DRIVER_MSG, "Use random MAC address\n");
-		random_ether_addr(pMac);
-	}
-#else
-	//  ds2460_read_generic(pMac, 0x90, 6);
 	etherm_addr(pMac);	
 	if (!is_valid_ether_addr (pMac)) {
 		PRINTK (DRIVER_MSG, "MAC read from ds2460 is invalid, so use random MAC address\n");
 		random_ether_addr(pMac);
 	}
-#endif
+
 }
 
 /*
@@ -2345,8 +1218,6 @@ static void do_set_multicast_list (struct net_device *ndev)
 	}
 	else if (ndev->flags & IFF_ALLMULTI || mc_count)
 	{
-		// dump_stack();
-		// printk("zty multi mode!\n");
 		writeb (E8390_RXCONFIG | 0x08, ax_base + ADDR_SHIFT16(EN0_RXCR));
 		// writeb (0x04, ax_base + ADDR_SHIFT16(EN0_RXCR));
 	}
@@ -2355,7 +1226,6 @@ static void do_set_multicast_list (struct net_device *ndev)
 		// printk("zty broadcast mode!\n");
 		writeb (E8390_RXCONFIG, ax_base + ADDR_SHIFT16(EN0_RXCR));
 	}
-	//  writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RXCR));
  }
 
 
@@ -2600,6 +1470,7 @@ static void ax88796b_watchdog (unsigned long arg)
 	struct net_device *ndev = (struct net_device *)(arg);
  	struct ax_device *ax_local = ax_get_priv (ndev);
 	unsigned long time_to_wake = AX88796_WATCHDOG_PERIOD_50MS;
+	unsigned long flags;
 	u8 link;
 	u16 phy_reg;
 
@@ -2607,9 +1478,10 @@ static void ax88796b_watchdog (unsigned long arg)
 	case wait_autoneg:
 
 		if (ax_get_link (ax_local)) {
+			ax88796b_send_data(ndev);
 			ax_media_link (ndev);
 			ax_local->state = chk_link;
-			ax88796b_send_data(ndev);
+			
 		} else if (ax_local->tick_times-- < 0) {
 			ax_local->state = chk_cable_exist;
 			ax_local->tick_times = (1800 / 50); //1.8s
@@ -2626,36 +1498,67 @@ static void ax88796b_watchdog (unsigned long arg)
 			} else {
 				netif_stop_queue (ndev);
 				netif_carrier_off (ndev);
+				if(gAxRxTx_state != 0)
+				{
+					printk("hndz close dma chan!\n");
+					spin_lock_irqsave(&ax_local->page_lock, flags);
+					if(dma_m2m_txchan != NULL)
+						dmaengine_terminate_all(dma_m2m_txchan);
+					if(dma_m2m_rxchan != NULL)
+						dmaengine_terminate_all(dma_m2m_rxchan);
+					gAxRxTx_state = 0;
+					ax_local->dmaing = 0;
+					spin_unlock_irqrestore(&ax_local->page_lock, flags);
+				}
 				PRINTK (DRIVER_MSG, 
 					"%s Link down.\n", ndev->name);
 				ax_local->state = chk_cable_exist;
 				ax_local->tick_times = (1800 / 50); //1.8s
 			}
 		}
-		else if(sbcast_info.bcast_mark)
+		else 
 		{
-			ax_local->time_num++;
-			if(ax_local->time_num >= sbcast_info.bcast_time/50) //5s
+			if(sbcast_info.bcast_mark)
 			{
-				void *ax_base = ax_local->membase; 
-				ax_local->time_num = 0;
-				if(sbcast_info.bcast_max && ax_local->boardcast_num > sbcast_info.bcast_max)
+				ax_local->time_num++;
+				if(ax_local->time_num >= sbcast_info.bcast_time/50) //5s
 				{
-					ax_local->storm_mark = 1;
-					printk("hndz board cast so mach %d!\n", ax_local->boardcast_num);
-					writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RXCR));
+					void *ax_base = ax_local->membase; 
+					ax_local->time_num = 0;
+					if(sbcast_info.bcast_max && ax_local->boardcast_num > sbcast_info.bcast_max)
+					{
+						ax_local->storm_mark = 1;
+						printk("hndz board cast so mach %d!\n", ax_local->boardcast_num);
+						writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RXCR));
+						ax_local->boardcast_num  = 0;
+						break;
+					}
 					ax_local->boardcast_num  = 0;
-					break;
-				}
-				ax_local->boardcast_num  = 0;
-				if(ax_local->storm_mark == 1)
-				{
-					printk("hndz start boardcast recv!\n");
-					ax_local->storm_mark = 0;
+					if(ax_local->storm_mark == 1)
+					{
+						printk("hndz start boardcast recv!\n");
+						ax_local->storm_mark = 0;
 
-					writeb (0x04, ax_base + ADDR_SHIFT16(EN0_RXCR));
+						writeb (0x04, ax_base + ADDR_SHIFT16(EN0_RXCR));
+					}
+					// printk("hndz board cast num %d!\n", ax_local->boardcast_num);
 				}
-				// printk("hndz board cast num %d!\n", ax_local->boardcast_num);
+			}
+			if(gAxRxTx_state != 0)
+			{
+				if (jiffies - gdma_start_time > 2*HZ/100) {  //超时
+					printk("hndz ax88796 %d timervoer!\n", gAxRxTx_state);
+					spin_lock_irqsave(&ax_local->page_lock, flags);
+					if(dma_m2m_txchan != NULL)
+						dmaengine_terminate_all(dma_m2m_txchan);
+					if(dma_m2m_rxchan != NULL)
+						dmaengine_terminate_all(dma_m2m_rxchan);
+					gAxRxTx_state = 0;
+					ax_local->dmaing = 0;
+					spin_unlock_irqrestore(&ax_local->page_lock, flags);
+
+				}
+
 			}
 		}
 		break;
@@ -2770,104 +1673,6 @@ ax88796b_get_hdr (struct net_device *ndev,
 
 /*
  * ----------------------------------------------------------------------------
- * Function Name: ax88796b_block_input
- * Purpose:
- * ----------------------------------------------------------------------------
- */
-#if 0
-static void 
-ax88796b_block_input (struct net_device *ndev, int count,
-			struct sk_buff *skb, int ring_offset)
-{
-    struct ax_device *ax_local = ax_get_priv (ndev);
-	void *ax_base = ax_local->membase;
-	u16 *buf = (u16 *)skb->data;
-	u16 i;
-
-	/* This shouldn't happen. If it does, it's the last thing you'll see */
-	if (ax_local->dmaing)
-	{
-		PRINTK (ERROR_MSG, PFX " DMAing conflict in ne_block_input "
-			"[DMAstat:%d][irqlock:%d].\n",
-			ax_local->dmaing, ax_local->irqlock);
-		return;
-	}
-
-	ax_local->dmaing |= 0x01;
-
-	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-	writeb (count & 0xff, ax_base + ADDR_SHIFT16(EN0_RCNTLO));
-	writeb (count >> 8, ax_base + ADDR_SHIFT16(EN0_RCNTHI));
-	writeb (ring_offset & 0xff, ax_base + ADDR_SHIFT16(EN0_RSARLO));
-	writeb (ring_offset >> 8, ax_base + ADDR_SHIFT16(EN0_RSARHI));
-	writeb (E8390_RREAD, ax_base + ADDR_SHIFT16(E8390_CMD));
-
-
-	while ((readb (ax_base + ADDR_SHIFT16(EN0_SR)) & ENSR_DMA_READY) == 0);
-
-#if (CONFIG_AX88796B_USE_MEMCPY == 1)
-	{
-		/* make the burst length be divided for 32-bit */
-		i = ((count - 2) + 3) & 0x7FC;
-
-		/* Read first 2 bytes */
-		*buf = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-
-		/* The address of ++buf should be agigned on 32-bit boundary */
-		memcpy (++buf, ax_base + ADDR_SHIFT16(EN0_DATA_ADDR), i);
-	}
-#else
-	{
-		// if(debugPrint == 0)
-		// {
-		// 	sdma_eim_read(count +2);
-		// 	tasklet_eim_rx_handle(ndev);
-		// 	printk("zty tasklet_eim_rx_handle end!\n");
-		// 	debugPrint = 1;
-		// 	//while (sdma_read_ok == 0);
-
-		// }
-		// else
-		{
-			// if(debugPrint < 6)
-			// {
-			// 	printk("read %d start 0x%lx!\n", count, jiffies);
-			// }
-			for (i = 0; i < count; i += 2)
-				*buf++ = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-
-			//for (i = 0; i < count -2; i += 2) {
-			//	 *buf++ = zREAD_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-			//	// *buf++ = *((u16*)(ax_base + ADDR_SHIFT16(EN0_DATAPORT)));
-			//}
-			//*buf = READ_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT));
-			// if(debugPrint < 6)
-			// {
-			// 	printk("read end 0x%lx!\n", jiffies);
-			// 	debugPrint++;
-			// }
-			// buf = (u16 *)skb->data;
-			// for(i = 0; i < 6; i++)
-			// 	printk("0x%x ", *(buf+i));
-			// printk("!\n");
-		}
-	}
-#endif
-
-	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
-	// if(debugPrint == 0)
-	// {
-	// 	printk("zty receive size 0x%x!\n", count);
-	// 	for(i = 0; i < count; i++)
-	// 		printk("0x%x ", ((u8 *)skb->data)[i]);
-	// 	printk("\n");
-	// 	debugPrint = 1;
-	// }
-	ax_local->dmaing = 0;
-}
-#endif
-/*
- * ----------------------------------------------------------------------------
  * Function Name: ax_trigger_send
  * Purpose:
  * ----------------------------------------------------------------------------
@@ -2927,11 +1732,6 @@ ax_block_output (struct net_device *ndev, int count,
 		u16 i;
 		for (i = 0; i < count; i += 2)
 			WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
-		// for (i = 0; i < count -2; i += 2) {
-
-		// 	 zWRITE_FIFO(ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
-		// }
-		// WRITE_FIFO (ax_base + ADDR_SHIFT16(EN0_DATAPORT), *((u16 *)(buf + i)));
 	}
 #endif
 
@@ -2959,7 +1759,143 @@ ax_block_output (struct net_device *ndev, int count,
  * Purpose: begin packet transmission
  * ----------------------------------------------------------------------------
  */
- int ax88796b_start_xmit (struct sk_buff *skb, struct net_device *ndev)
+
+static void dma_m2m_tx_callback(void *data)
+{
+	// int i = 0;
+	unsigned long flags;
+	struct sk_buff  * skb;
+	struct net_device *ndev = (struct net_device *)data;
+
+	
+	struct ax_device *ax_local = ax_get_priv (ndev);
+
+	void *ax_base = ax_local->membase;
+
+	if(gAxStop == 1)
+	{
+		gAxRxTx_state = 0;
+		return;
+	}
+	
+	spin_lock_irqsave (&ax_local->page_lock, flags);
+	skb = ax_local->tx_skb;
+	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+
+	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));	/* Ack intr. */
+
+	ax_local->dmaing = 0;
+
+	ax_trigger_send (ndev, eim_tx_length, ax_local->tx_curr_page);
+
+	if (gfree_pages == gneed_pages) {
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+	}
+	ax_local->tx_prev_ctepr = gctepr;
+	ax_local->tx_curr_page = ((ax_local->tx_curr_page + gneed_pages) <
+		ax_local->tx_stop_page) ? 
+		(ax_local->tx_curr_page + gneed_pages) : 
+		(gneed_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+			+ ax_local->tx_start_page);
+
+	ax_local->irqlock = 0;	
+
+	ax_local->tx_skb = NULL;
+	
+	gdma_start_time = jiffies;
+	gAxRxTx_state = 2;
+	CurrImr = ENISR_TX;
+	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
+	
+	
+
+	spin_unlock_irqrestore (&ax_local->page_lock, flags);
+	dev_kfree_skb (skb);
+
+
+	
+
+	ndev->trans_start = jiffies;
+	ax_local->stat.tx_bytes += eim_tx_length;
+	
+	
+	return ;
+}
+
+
+
+static  int eim_sdma_tx_start(struct net_device *ndev, int count, const unsigned char *buf, const int start_page)
+{
+
+	struct dma_async_tx_descriptor *dma_m2m_desc;
+	unsigned int size;
+
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+
+	// gtime1 = hndz_read_current_timer();
+	memcpy(gEIMtxbuf, buf, count);
+
+	eim_tx_length = count;
+	
+	 size = (eim_tx_length +4) & 0x7FE;
+
+		/* This shouldn't happen. If it does, it's the last thing you'll see */
+	if (ax_local->dmaing)
+	{
+		printk ("hndz DMAing conflict in ne_block_output."
+			"[DMAstat:%d][irqlock:%d]\n",
+			ax_local->dmaing, ax_local->irqlock);
+		
+		return -2;
+	}
+
+	dma_m2m_desc = dma_m2m_txchan->device->device_prep_dma_memcpy(dma_m2m_txchan,
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  gdma_src, size, DMA_MEM_TO_MEM);													
+	if (!dma_m2m_desc)
+	{
+		ax_local->dmaing = 0;
+		printk("tx prep error!!\n");
+		return -4;
+	}
+
+	ax_local->dmaing |= 0x01;
+
+
+		/* Now the normal output. */
+	writeb (size & 0xff, ax_base + ADDR_SHIFT16(EN0_RCNTLO));
+	writeb (size >> 8,   ax_base + ADDR_SHIFT16(EN0_RCNTHI));
+	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_RSARLO));
+	writeb (start_page, ax_base + ADDR_SHIFT16(EN0_RSARHI));
+
+	writeb (E8390_RWRITE, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+
+
+	
+	//设置dma传输完成后的回调函数	
+	dma_m2m_desc->callback = dma_m2m_tx_callback;
+	dma_m2m_desc->callback_param = (void *)ndev;
+
+
+	gdma_start_time = jiffies;
+	gAxRxTx_state = 2;
+	ax_local->irqlock  = 1;
+
+	dmaengine_submit(dma_m2m_desc);
+	dma_async_issue_pending(dma_m2m_txchan);
+	// gtime2 = hndz_read_current_timer();
+	// printk("hndz tx 1 %lu!\n", gtime2 - gtime1);
+
+		/* Now the normal output. */
+
+
+	return 0;	
+}
+
+static int ax88796b_eim_dma_start_xmit (struct sk_buff *skb, struct net_device *ndev)
 {
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	void *ax_base = ax_local->membase;
@@ -2967,19 +1903,28 @@ ax_block_output (struct net_device *ndev, int count,
 	unsigned long flags;
 	u8 ctepr=0, free_pages=0, need_pages;
 
-	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
 
+	if(gAxStop == 1)
+	{
+		return NETDEV_TX_BUSY;
+	}
 	send_length = skb->len;
-	// dump_stack();
-	// mutex_lock(&eim_lock);
-	// printk("zty send start!\n");
-	// if(sdma_read_ok == 1)
-	// {
-	// 	printk("zty eim is rx!\n");
-	// 	dump_stack();
-	// 	return NETDEV_TX_BUSY;
-	// }
+
 	spin_lock_irqsave (&ax_local->page_lock, flags);
+
+	if (ax_local->tx_skb) {
+		printk("hndz ax hard_xmit called while tx busy\n");
+		spin_unlock_irqrestore(&ax_local->page_lock, flags);
+		return NETDEV_TX_BUSY;
+	}
+	netif_stop_queue (ndev);
+	ax_local->tx_skb = skb;
+	if(gAxRxTx_state != 0)
+	{
+		spin_unlock_irqrestore(&ax_local->page_lock, flags);
+		return NETDEV_TX_OK;
+	}
+	
 
 	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
 
@@ -3021,12 +1966,8 @@ ax_block_output (struct net_device *ndev, int count,
 			free_pages = TX_PAGES;
 	}
 
-	PRINTK (DEBUG_MSG, PFX " tx pkt len %d, need %d pages, free pages %d\n",
-		skb->len, need_pages, free_pages);
-
 	if (free_pages < need_pages) {
-		PRINTK (DEBUG_MSG, "free_pages < need_pages\n");
-		//printk("zty ax88796 start send!\n");
+		printk("hndz free_pages < need_pages\n");
 		netif_stop_queue (ndev);
 		ax_local->tx_full = 1;
 		ax_local->irqlock = 0;	
@@ -3035,43 +1976,46 @@ ax_block_output (struct net_device *ndev, int count,
 		return NETDEV_TX_BUSY;
 	}
 
-	if (DEBUG_MSG & DEBUG_FLAGS) {
-		int i;
-		PRINTK (DEBUG_MSG, PFX " Dump tx pkt %d", skb->len);
-		for (i = 0; i < skb->len; i++) {
-			if ((i % 16) == 0)
-				PRINTK (DEBUG_MSG, "\n");
-			PRINTK (DEBUG_MSG, 
-				"%02x ", *(skb->data + i));
+	if(send_length > 64)
+	{
+		eim_sdma_tx_start (ndev, send_length, skb->data, ax_local->tx_curr_page);
+		gctepr= ctepr;
+		gfree_pages = free_pages;
+		gneed_pages = need_pages;
+		spin_unlock_irqrestore (&ax_local->page_lock, flags);
+
+	}
+	else
+	{
+		//  gtime1 = hndz_read_current_timer();
+		ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
+		ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+		if (free_pages == need_pages) {
+			netif_stop_queue (ndev);
+			ax_local->tx_full = 1;
 		}
-		PRINTK (DEBUG_MSG, "\n");
+		ax_local->tx_prev_ctepr = ctepr;
+		ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+			ax_local->tx_stop_page) ? 
+			(ax_local->tx_curr_page + need_pages) : 
+			(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+			+ ax_local->tx_start_page);
+
+		ax_local->irqlock = 0;	
+		ax_local->tx_skb = NULL;
+
+		gdma_start_time = jiffies;
+		gAxRxTx_state = 2;
+		CurrImr = ENISR_TX;
+		writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
+		spin_unlock_irqrestore (&ax_local->page_lock, flags);
+		//  gtime2 = hndz_read_current_timer();
+		dev_kfree_skb (skb);
+
+		ndev->trans_start = jiffies;
+		ax_local->stat.tx_bytes += send_length;
+		// printk("hndz tx %lu!\n", gtime2 - gtime1);
 	}
-	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
-	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
-	if (free_pages == need_pages) {
-		netif_stop_queue (ndev);
-		ax_local->tx_full = 1;
-	}
-	ax_local->tx_prev_ctepr = ctepr;
-	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
-		ax_local->tx_stop_page) ? 
-		(ax_local->tx_curr_page + need_pages) : 
-		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
-		 + ax_local->tx_start_page);
-
-	ax_local->irqlock = 0;	
-	// printk("zty ax88796 start send ii!\n");
-	writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-
-	spin_unlock_irqrestore (&ax_local->page_lock, flags);
-	// mutex_unlock(&eim_lock);
-
-	dev_kfree_skb (skb);
-
-	ndev->trans_start = jiffies;
-	ax_local->stat.tx_bytes += send_length;
-	// printk("zty send end!\n");
-	PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
 
 	return NETDEV_TX_OK;
 }
@@ -3139,21 +2083,417 @@ static void ax_tx_err (struct net_device *ndev)
 		if (txsr & ENTSR_OWC) ax_local->stat.tx_window_errors++;
 	}
 }
-#if 0
-static int ax88796b_rx_poll(struct net_device *ndev, struct ax_device *ax_local,
-		      int budget)
+
+/*
+ * ----------------------------------------------------------------------------
+ * Function Name: ax_sdma_rx
+ * Purpose:
+ * ----------------------------------------------------------------------------
+ */
+static int ax88796b_send_data_process (struct sk_buff *skb, struct net_device *ndev)
+{
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+	int send_length;
+
+	u8 ctepr=0, free_pages=0, need_pages;
+
+	send_length = skb->len;
+
+	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+	ax_local->irqlock = 1;
+
+	need_pages = ((send_length - 1) >> 8) + 1;
+
+	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
+
+	if (ctepr & ENCTEPR_TXCQF) {
+		free_pages = 0;
+	} else if (ctepr == 0) {
+
+		/*
+		 * If someone issues STOP bit of command register at run time,
+		 * the TX machine will stop the current transmission and the
+		 * CTEPR register will be reset to zero.
+		 * This is just precautionary measures.
+		 */
+		if (ax_local->tx_prev_ctepr != 0) {
+			ax_local->tx_curr_page = ax_local->tx_start_page;
+			ax_local->tx_prev_ctepr = 0;
+		}
+
+		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
+	}
+	else if (ctepr < ax_local->tx_curr_page - 1) {
+		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
+					ctepr - ax_local->tx_start_page + 1;
+	}
+	else if (ctepr > ax_local->tx_curr_page - 1) {
+		free_pages = ctepr + 1 - ax_local->tx_curr_page;
+	}
+	else if (ctepr == ax_local->tx_curr_page - 1) {
+		if (ax_local->tx_full)
+			free_pages = 0;
+		else
+			free_pages = TX_PAGES;
+	}
+
+
+	if (free_pages < need_pages) {
+		printk("hndz process free_pages < need_pages\n");
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+		ax_local->irqlock = 0;
+		ax_local->tx_skb = NULL;	
+		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+		return NETDEV_TX_BUSY;
+	}
+	ax_block_output (ndev, send_length, skb->data, ax_local->tx_curr_page);
+	ax_trigger_send (ndev, send_length, ax_local->tx_curr_page);
+	if (free_pages == need_pages) {
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+	}
+	ax_local->tx_prev_ctepr = ctepr;
+	ax_local->tx_curr_page = ((ax_local->tx_curr_page + need_pages) <
+		ax_local->tx_stop_page) ? 
+		(ax_local->tx_curr_page + need_pages) : 
+		(need_pages - (ax_local->tx_stop_page - ax_local->tx_curr_page)
+		 + ax_local->tx_start_page);
+
+	ax_local->irqlock = 0;	
+
+	gdma_start_time = jiffies;
+	gAxRxTx_state = 2;
+	CurrImr = ENISR_TX;
+	writeb (ENISR_TX, ax_base + ADDR_SHIFT16(EN0_IMR));
+	
+
+	// dev_kfree_skb (skb);
+
+	// ndev->trans_start = jiffies;
+	// ax_local->stat.tx_bytes += send_length;
+	return 0;
+}
+
+static int ax88796b_dma_send_data_process (struct sk_buff *skb, struct net_device *ndev)
+{
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+	int send_length;
+
+	u8 ctepr=0, free_pages=0, need_pages;
+
+	send_length = skb->len;
+
+	writeb (E8390_PAGE0 | E8390_NODMA, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+	ax_local->irqlock = 1;
+
+	need_pages = ((send_length - 1) >> 8) + 1;
+
+	ctepr = readb (ax_base + ADDR_SHIFT16(EN0_CTEPR));
+
+	if (ctepr & ENCTEPR_TXCQF) {
+		free_pages = 0;
+	} else if (ctepr == 0) {
+
+		/*
+		 * If someone issues STOP bit of command register at run time,
+		 * the TX machine will stop the current transmission and the
+		 * CTEPR register will be reset to zero.
+		 * This is just precautionary measures.
+		 */
+		if (ax_local->tx_prev_ctepr != 0) {
+			ax_local->tx_curr_page = ax_local->tx_start_page;
+			ax_local->tx_prev_ctepr = 0;
+		}
+
+		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page;
+	}
+	else if (ctepr < ax_local->tx_curr_page - 1) {
+		free_pages = ax_local->tx_stop_page - ax_local->tx_curr_page + 
+					ctepr - ax_local->tx_start_page + 1;
+	}
+	else if (ctepr > ax_local->tx_curr_page - 1) {
+		free_pages = ctepr + 1 - ax_local->tx_curr_page;
+	}
+	else if (ctepr == ax_local->tx_curr_page - 1) {
+		if (ax_local->tx_full)
+			free_pages = 0;
+		else
+			free_pages = TX_PAGES;
+	}
+
+	if (free_pages < need_pages) {
+		printk("hndz  dma process free_pages < need_pages\n");
+		netif_stop_queue (ndev);
+		ax_local->tx_full = 1;
+		ax_local->irqlock = 0;	
+		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+		return NETDEV_TX_BUSY;
+	}
+
+	eim_sdma_tx_start (ndev, send_length, skb->data, ax_local->tx_curr_page);
+	gctepr= ctepr;
+	gfree_pages = free_pages;
+	gneed_pages = need_pages;
+	return 0;
+}
+
+static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local);
+
+static int gRxNumcount = 0;
+//DMA回调函数
+static void dma_m2m_rx_callback(void *data)
+{
+	int i = 0;
+	unsigned long flags;
+	unsigned char rxing_page, this_frame, next_frame;
+	struct net_device *ndev = (struct net_device *)data;
+	u8 cmd;
+	struct ax_device *ax_local = ax_get_priv (ndev);
+
+	int pkt_len = eim_rx_length;
+
+	struct sk_buff *skb;
+	struct sk_buff *txskb;
+	int status;
+
+	void *ax_base = ax_local->membase;
+
+	if(ndev == NULL)
+	{
+		printk("zty callback data error!\n");
+		return ;
+	}
+
+
+	spin_lock_irqsave (&ax_local->page_lock, flags);
+
+
+	if(gAxStop == 1)
+	{
+		gAxRxTx_state = 0;
+		spin_unlock_irqrestore (&ax_local->page_lock, flags);
+		return ;
+	}
+
+	skb = dev_alloc_skb (pkt_len + 2);
+	if (skb == NULL) {
+		printk(" Couldn't allocate a sk_buff"
+			" of size %d.\n", pkt_len);
+		ax_local->stat.rx_dropped++;
+
+		spin_unlock_irqrestore (&ax_local->page_lock, flags);
+		
+		return;
+	}
+
+	/* IP headers on 16 byte boundaries */
+	skb_reserve (skb, 2);
+	skb->dev = ndev;
+	skb_put (skb, pkt_len);
+	memcpy(skb->data, gEIMrxbuf, eim_rx_length);	
+	// dma_unmap_single(NULL, dma_dst, 2048, DMA_DEV_TO_MEM);
+	skb->protocol = eth_type_trans (skb,ndev);
+
+	skb_queue_tail(&ax_local->skb_queue, skb);
+
+	gdma_start_time = jiffies;
+	ndev->last_rx = jiffies;
+	ax_local->stat.rx_packets++;
+	ax_local->stat.rx_bytes += pkt_len;
+	if (grx_frame.status & ENRSR_PHY)
+	{
+		ax_local->stat.multicast++;
+		ax_local->boardcast_num++;
+	}
+
+
+	gRxNumcount++;
+ 	
+   
+	writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
+	ax_local->dmaing = 0;
+
+	next_frame = grx_frame.next;
+
+	ax_local->current_page = next_frame;
+	writeb (next_frame-1, ax_base + ADDR_SHIFT16(EN0_BOUNDARY));
+
+	if(gRxNumcount < 6)
+	{
+		rxing_page = readb (ax_base + ADDR_SHIFT16(EN0_CURPAG));
+
+		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
+		if (this_frame >= ax_local->stop_page)
+			this_frame = ax_local->rx_start_page;
+		
+		if (this_frame == rxing_page) {	/* Read all the frames? */
+			gAxRxTx_state = 0;
+			ax_local->irqlock 	 = 0;
+			gRxNumcount = 0;
+
+			cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
+			writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
+
+			CurrImr = ENISR_ALL;
+			writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+			
+		}
+		else
+		{
+			 if(ax88796b_sdma_rx_poll(ndev, ax_local) != 1)
+			 {
+
+				gAxRxTx_state = 0;
+				ax_local->irqlock 	 = 0;
+				gRxNumcount = 0;
+
+				cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
+				writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
+
+				writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
+				printk("hndz call back rx error!\n");
+				gRxNumcount = 0;
+			 }
+			 else
+			 {
+				i = 1;
+			 }
+		}
+	}
+
+	if(i == 0)
+	{
+		napi_schedule(&ax_local->napi);
+		if(ax_local->tx_skb != NULL)
+		{
+			if(skb->len > 64)
+				status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
+			else
+			{
+			 	status = ax88796b_send_data_process(ax_local->tx_skb, ndev);
+				if(status != 0)
+					printk("hndz call send ret is 0x%x!\n", status);
+				txskb = ax_local->tx_skb;
+				ax_local->tx_skb = NULL;
+				spin_unlock_irqrestore (&ax_local->page_lock, flags);
+				dev_kfree_skb (txskb);
+
+				ndev->trans_start = jiffies;
+				ax_local->stat.tx_bytes += skb->len ;
+				return ;
+			}
+			// status = ax88796b_dma_send_data_process(ax_local->tx_skb, ndev);
+			
+			if(status != 0)
+				printk("hndz call send ret is 0x%x!\n", status);
+		}
+	}
+
+	spin_unlock_irqrestore (&ax_local->page_lock, flags);
+	
+	
+	return ;
+}
+
+
+
+static  int eim_sdma_rx_start(unsigned int size, unsigned short current_offset, struct net_device * ndev)
+{
+
+	int ret = 0;
+	int ring_offset;
+	uint32_t i = 0;
+	struct dma_async_tx_descriptor *dma_m2m_desc;
+	unsigned int count;
+	// struct net_device *ndev = (struct net_device *)data;
+
+	struct ax_device *ax_local = ax_get_priv (ndev);
+	void *ax_base = ax_local->membase;
+
+	eim_rx_length = size;
+	ring_offset = current_offset;	
+	count = (eim_rx_length + 4) & 0x7FE;
+
+	
+	if(size > 2048)
+	{
+		printk("hndz net rec %d data too long!\n", size);
+		ret = -1;
+		return ret;
+	}
+
+
+	if (ax_local->dmaing)
+	{
+		printk ("hndz DMAing conflict in ne_block_input "
+			"[DMAstat:%d][irqlock:%d].\n",
+			ax_local->dmaing, ax_local->irqlock);
+		return -3;
+	}
+
+	ax_local->dmaing |= 0x01;
+
+	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+	writeb (count & 0xff, ax_base + ADDR_SHIFT16(EN0_RCNTLO));
+	writeb (count >> 8, ax_base + ADDR_SHIFT16(EN0_RCNTHI));
+	writeb (ring_offset & 0xff, ax_base + ADDR_SHIFT16(EN0_RSARLO));
+	writeb (ring_offset >> 8, ax_base + ADDR_SHIFT16(EN0_RSARHI));
+	writeb (E8390_RREAD, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+	
+	// eim_sdma_rx_init_config();
+	while ((readb (ax_base + ADDR_SHIFT16(EN0_SR)) & ENSR_DMA_READY) == 0)
+	{
+		i++;
+		if(i >= 0x000000ff)
+		{
+			printk("hndz ax dma time over!\n");
+			ax_local->dmaing = 0;
+			return -5;
+		}
+	}
+
+	dma_m2m_desc = dma_m2m_rxchan->device->device_prep_dma_memcpy(dma_m2m_rxchan, gdma_dst,
+	(EIM_CS0_PHY_START_ADDR + ADDR_SHIFT16(EN0_DATAPORT)),  count, DMA_MEM_TO_MEM);													
+	if (!dma_m2m_desc)
+	{
+		ax_local->dmaing = 0;
+		printk("rx prep error!!\n");
+		return -4;
+	}
+	
+	//设置dma传输完成后的回调函数	
+	dma_m2m_desc->callback = dma_m2m_rx_callback;
+	dma_m2m_desc->callback_param = (void *)ndev;
+	// printk("zty eim submit start 0x%lx!\n", jiffies);
+
+	gdma_start_time = jiffies;
+	gAxRxTx_state = 1;
+	ax_local->irqlock  = 1;
+	gRxNumcount = 0;
+
+	dmaengine_submit(dma_m2m_desc);
+	dma_async_issue_pending(dma_m2m_rxchan);
+	return 0;	
+}
+
+static int ax88796b_sdma_rx_poll(struct net_device *ndev, struct ax_device *ax_local)
 {
 	void *ax_base = ax_local->membase;
 	unsigned char rxing_page, this_frame, next_frame;
 	unsigned short current_offset;
-	struct ax_pkt_hdr rx_frame;
-	int pkt_cnt = 0;
-	int i;
+	// struct ax_pkt_hdr rx_frame;
+	int ret = 0;
 
-	//PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
-	// unsigned long time1, time2;
-	// time1 = hndz_read_current_timer();
-	for ( i = 0 ; i < budget && netif_running(ndev); i++) {
+	if(netif_running(ndev)) 
+	{
 
 		int pkt_len, pkt_stat;
 
@@ -3165,138 +2505,63 @@ static int ax88796b_rx_poll(struct net_device *ndev, struct ax_device *ax_local,
 		 * Boundary is always a page behind.
 		 */
 		this_frame = readb (ax_base + ADDR_SHIFT16(EN0_BOUNDARY)) + 1;
+
 		if (this_frame >= ax_local->stop_page)
 			this_frame = ax_local->rx_start_page;
 		
 		if (this_frame == rxing_page) {	/* Read all the frames? */
-			break;				/* Done for now */
+			return 0;			/* Done for now */
 		}
 		current_offset = this_frame << 8;
-		ax88796b_get_hdr (ndev, &rx_frame, this_frame);
+		ax88796b_get_hdr (ndev, &grx_frame, this_frame);
 
-		// PRINTK (DEBUG_MSG, PFX 
-		// 	" Current page 0x%x, boundary page 0x%x\n",
-		// 	rxing_page, this_frame);
 
-		pkt_len = rx_frame.count - sizeof (struct ax_pkt_hdr);
-		pkt_stat = rx_frame.status;
+		pkt_len = grx_frame.count - sizeof (struct ax_pkt_hdr);
+		pkt_stat = grx_frame.status;
 		next_frame = this_frame + 1 + ((pkt_len + 4) >> 8);
 
 		if (pkt_len < 60  ||  pkt_len > 1518) {
 			PRINTK (ERROR_MSG, PFX
 				" bogus pkt size: %d, status=%#2x nxpg=%#2x.\n",
-				rx_frame.count, rx_frame.status, rx_frame.next);
+				grx_frame.count, grx_frame.status, grx_frame.next);
 			ax_local->stat.rx_errors++;
 			ax_local->stat.rx_length_errors++;
 		} else if ((pkt_stat & 0x0F) == ENRSR_RXOK) {
-			struct sk_buff *skb;
-			int status;
-			skb = dev_alloc_skb (pkt_len + 2);
-			if (skb == NULL) {
-				PRINTK (ERROR_MSG, PFX
-					" Couldn't allocate a sk_buff"
-					" of size %d.\n", pkt_len);
-				ax_local->stat.rx_dropped++;
-				break;
-			}
-
-			/* IP headers on 16 byte boundaries */
-			skb_reserve (skb, 2);
-			skb->dev = ndev;
-			skb_put (skb, pkt_len);	/* Make room */
-			ax88796b_block_input (ndev, pkt_len, skb,
-					current_offset + sizeof (rx_frame));
-
-			// if (DEBUG_MSG & DEBUG_FLAGS) {
-			// 	int i;
-			// 	PRINTK (DEBUG_MSG, PFX 
-			// 		" Dump rx pkt %d", skb->len);
-			// 	for (i = 0; i < skb->len; i++) {
-			// 		if ((i % 16) == 0)
-			// 			PRINTK (DEBUG_MSG, "\n");
-			// 		PRINTK (DEBUG_MSG, 
-			// 			"%02x ", *(skb->data + i));
-			// 	}
-			// 	PRINTK (DEBUG_MSG, "\n");
-			// }
-
-			skb->protocol = eth_type_trans (skb,ndev);
-
-			status = netif_rx (skb);
-			if (status != NET_RX_SUCCESS)
-				PRINTK (ERROR_MSG,
-					"netif_rx status %d\n", status);
-
-			ndev->last_rx = jiffies;
-			ax_local->stat.rx_packets++;
-			ax_local->stat.rx_bytes += pkt_len;
-			if (pkt_stat & ENRSR_PHY)
+			if(eim_sdma_rx_start(pkt_len, current_offset + sizeof (grx_frame), ndev) == 0)
 			{
-				ax_local->stat.multicast++;
-				ax_local->boardcast_num++;
-				// printk("zty multicast!\n");
+				ret = 1;
+				return 1;
 			}
-			// else
-			// {
-			// 	// printk("zty boardcast packet!\n");
-			// 	ax_local->boardcast_num++;
-			// }
-
-			pkt_cnt++;
+			else
+			{
+				printk("hndz ax rx error!\n");
+			}
+			
+			
 		} else {
 			PRINTK (ERROR_MSG, PFX
 				" bogus packet: status=%#2x"
 				" nxpg=%#2x size=%d\n",
-				rx_frame.status, rx_frame.next, rx_frame.count);
+				grx_frame.status, grx_frame.next, grx_frame.count);
 			ax_local->stat.rx_errors++;
 			/* NB: The NIC counts CRC, frame and missed errors. */
 			if (pkt_stat & ENRSR_FO)
 				ax_local->stat.rx_fifo_errors++;
 		}
-		next_frame = rx_frame.next;
+		next_frame = grx_frame.next;
 
 		ax_local->current_page = next_frame;
 		writeb (next_frame-1, ax_base + ADDR_SHIFT16(EN0_BOUNDARY));
 
 	}
-	// time2 = hndz_read_current_timer();
-	// printk("hndz 88796 time %lu num %d!\n", time2-time1, pkt_cnt);
-	//PRINTK (DEBUG_MSG, PFX " %s end ..........\n", __FUNCTION__);
-
-	return pkt_cnt;
-}
-
-static int ax88796b_poll(struct napi_struct *napi, int budget)
-{
-	struct ax_device *ax_local = container_of(napi, struct ax_device, napi);
-	struct net_device *dev = ax_local->ndev;
-	void *ax_base = ax_local->membase;
-	int work_done;
-	u8 cmd;
-	unsigned long flags;
-
-	//PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
-
-	spin_lock_irqsave(&ax_local->page_lock, flags);
-
-	work_done = ax88796b_rx_poll(dev, ax_local, budget);
-
-	
-	if (work_done < budget) {
-
-		cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
-		writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
-		writeb (ENISR_ALL, ax_base + ADDR_SHIFT16(EN0_IMR));
-		  __napi_complete(napi);
-
+	else
+	{
+		printk("hndz netif_running no runing!\n");
 	}
 
-	
-	spin_unlock_irqrestore(&ax_local->page_lock, flags);
-
-	return work_done;
+	return ret;
 }
-#endif
+
 static int ax88796b_dma_poll(struct napi_struct *napi, int quota)
 {
 	struct ax_device *ax_local = container_of(napi, struct ax_device, napi);
@@ -3332,19 +2597,15 @@ static int ax88796b_dma_poll(struct napi_struct *napi, int quota)
  * Purpose:
  * ----------------------------------------------------------------------------
  */
-#if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,28)
- irqreturn_t ax_interrupt (int irq, void *dev_id)
-#else
-static irqreturn_t ax_interrupt (int irq, void *dev_id, struct pt_regs * regs)
-#endif
+
+static irqreturn_t ax_dma_interrupt (int irq, void *dev_id)
 {
 	struct net_device *ndev = dev_id;
 	int interrupts;
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	void *ax_base = ax_local->membase;
-	u8 CurrImr;
-
-	//PRINTK (INT_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
+	u8 cmd;
+	// u8 CurrImr;
 
 	if (ndev == NULL) 
 	{
@@ -3352,74 +2613,161 @@ static irqreturn_t ax_interrupt (int irq, void *dev_id, struct pt_regs * regs)
 			"net_interrupt(): irq %d for unknown device.\n", irq);
 		return IRQ_RETVAL (0);
 	}
+	if(gAxStop == 1)
+	{
+		spin_lock (&ax_local->page_lock);
+		writeb (E8390_NODMA | E8390_PAGE3, ax_base + ADDR_SHIFT16(E8390_CMD));
 
-	spin_lock (&ax_local->page_lock);
+		CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
 
-	writeb (E8390_NODMA | E8390_PAGE3, ax_base + ADDR_SHIFT16(E8390_CMD));
+		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+		writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
 
-	CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
+		if (ax_local->irqlock) {
+			printk ("Interrupt occurred when irqlock locked\n");
+			spin_unlock (&ax_local->page_lock);
+			return IRQ_RETVAL (0);
+		}
 
-	writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
-	writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
-
-	if (ax_local->irqlock) {
-		printk ("Interrupt occurred when irqlock locked\n");
+		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) == 0)
+		{
+			spin_unlock (&ax_local->page_lock);
+			return IRQ_RETVAL (1);
+		}
+		writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
 		spin_unlock (&ax_local->page_lock);
-		return IRQ_RETVAL (0);
+		return IRQ_RETVAL (1);
 	}
 
-	do {
+	spin_lock (&ax_local->page_lock);
+	if(gAxRxTx_state == 0)
+	{
+		
+		writeb (E8390_NODMA | E8390_PAGE2, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+		CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
+
+		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+		writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+
+
+		if (ax_local->irqlock) {
+			printk ("Interrupt occurred when irqlock locked\n");
+			spin_unlock (&ax_local->page_lock);
+			return IRQ_RETVAL (0);
+		}
+	
+		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) != 0)
+		{
+			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
+
+			if (interrupts & ENISR_TX) {
+
+				ax_tx_intr (ndev);
+				CurrImr = ENISR_ALL;			
+			}
+
+			if (interrupts & (ENISR_RX | ENISR_RX_ERR | ENISR_OVER)) {
+				if(ax88796b_sdma_rx_poll(ndev, ax_local) == 1)
+				{
+					CurrImr = 0;
+				}
+				else
+				{
+					CurrImr = ENISR_ALL;
+					cmd = readb (ax_base + ADDR_SHIFT16(E8390_CMD));
+					writeb ((cmd & E8390_PAGE_MASK) , ax_base + ADDR_SHIFT16(E8390_CMD));
+					
+				}			
+				
+			}
+
+			if (interrupts & ENISR_TX_ERR) {
+				PRINTK (INT_MSG, PFX " TX err int\n");
+				ax_tx_err (ndev);
+			}
+
+			if (interrupts & ENISR_COUNTERS) {   
+				ax_local->stat.rx_frame_errors += 
+						readb (ax_base + ADDR_SHIFT16(EN0_COUNTER0));
+				ax_local->stat.rx_crc_errors += 
+						readb (ax_base + ADDR_SHIFT16(EN0_COUNTER1));
+				ax_local->stat.rx_missed_errors += 
+						readb (ax_base + ADDR_SHIFT16(EN0_COUNTER2));
+				writeb (ENISR_COUNTERS, ax_base + ADDR_SHIFT16(EN0_ISR));
+			}
+
+			if (interrupts & ENISR_RDC)
+				writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
+		}
+		writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
+	}
+	else if (gAxRxTx_state == 2)
+	{		
+		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) != 0)
+		{
+			gdma_start_time = jiffies;
+			writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR));
+			if (interrupts & ENISR_TX) 
+			{
+				ax_tx_intr (ndev);
+
+				gAxRxTx_state = 0;
+				
+				CurrImr = 0;
+				writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
+				if(ax88796b_sdma_rx_poll(ndev, ax_local) != 1)
+				{
+					CurrImr = ENISR_ALL;
+					writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
+				}
+				
+			}
+			else
+			{
+				if (!(interrupts & (ENISR_RX))){
+					printk("hndz tx rx inter error 0x%x!\n", interrupts);
+				}
+				
+			}
+
+		}
+		else
+		{
+			printk("hndz tx error!\n");
+		}
+
+	}
+	else
+	{
+		// writeb (E8390_NODMA | E8390_PAGE3, ax_base + ADDR_SHIFT16(E8390_CMD));
+
+		// CurrImr = readb (ax_base + ADDR_SHIFT16(EN0_IMR));
+
+		writeb (E8390_NODMA | E8390_PAGE0, ax_base + ADDR_SHIFT16(E8390_CMD));
+		// writeb (0x00, ax_base + ADDR_SHIFT16(EN0_IMR));
+
+		if (ax_local->irqlock) {
+			printk ("Interrupt occurred when irqlock locked\n");
+			spin_unlock (&ax_local->page_lock);
+			return IRQ_RETVAL (0);
+		}
+
 		if ((interrupts = readb (ax_base + ADDR_SHIFT16(EN0_ISR))) == 0)
-			break;
-		// printk("zty 88796 interupt 0x%x!\n", interrupts);
+		{
+			spin_unlock (&ax_local->page_lock);
+			return IRQ_RETVAL (1);
+		}
 		writeb (interrupts, ax_base + ADDR_SHIFT16(EN0_ISR)); /* Ack the interrupts */
 
-		if (interrupts & ENISR_TX) {
-			PRINTK (INT_MSG, PFX " TX int\n");
-			ax_tx_intr (ndev);
-		}
-
-		if (interrupts & (ENISR_RX | ENISR_RX_ERR | ENISR_OVER)) {
-			//PRINTK (INT_MSG, PFX " RX int\n");
-
-			if (napi_schedule_prep(&ax_local->napi)) {
-				CurrImr = ENISR_ALL & ~(ENISR_RX | ENISR_RX_ERR | ENISR_OVER);
-				__napi_schedule(&ax_local->napi);
-			}
-		}
-
-		if (interrupts & ENISR_TX_ERR) {
-			PRINTK (INT_MSG, PFX " TX err int\n");
-			ax_tx_err (ndev);
-		}
-
-		if (interrupts & ENISR_COUNTERS) {   
-			ax_local->stat.rx_frame_errors += 
-					readb (ax_base + ADDR_SHIFT16(EN0_COUNTER0));
-			ax_local->stat.rx_crc_errors += 
-					readb (ax_base + ADDR_SHIFT16(EN0_COUNTER1));
-			ax_local->stat.rx_missed_errors += 
-					readb (ax_base + ADDR_SHIFT16(EN0_COUNTER2));
-			writeb (ENISR_COUNTERS, ax_base + ADDR_SHIFT16(EN0_ISR));
-		}
-
-		if (interrupts & ENISR_RDC)
-			writeb (ENISR_RDC, ax_base + ADDR_SHIFT16(EN0_ISR));
-	} while (0);
-
-	writeb (CurrImr, ax_base + ADDR_SHIFT16(EN0_IMR));
-	
+	}
 
 	spin_unlock (&ax_local->page_lock);
 
-
-	//PRINTK (INT_MSG, PFX " %s end ..........\n", __FUNCTION__);
-
 	return IRQ_RETVAL (1);
 }
-
-
-
 /*
  * ----------------------------------------------------------------------------
  * Function Name: ax88796b_open
@@ -3433,16 +2781,12 @@ static int ax88796b_open (struct net_device *ndev)
 	int ret = 0;
 
 	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
-	gAxStop = 0;
-	skb_queue_head_init(&ax_local->skb_queue);
-#ifndef AX88796_SDMA_MODE
-	//   ret = request_irq (ndev->irq,&ax_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
-	   ret = request_irq (ndev->irq, &ax_dma_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
-#else
-	ret = request_irq (ndev->irq,&ax_sdma_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
-#endif
 	
+	skb_queue_head_init(&ax_local->skb_queue);
 
+	ret = request_irq (ndev->irq, &ax_dma_interrupt,IRQF_TRIGGER_FALLING, ndev->name, ndev);
+
+	
 	if (ret) {
 		PRINTK (ERROR_MSG, PFX
 			" unable to get IRQ %d (errno=%d).\n",
@@ -3453,7 +2797,7 @@ static int ax88796b_open (struct net_device *ndev)
 	PRINTK (DEBUG_MSG, PFX " Request IRQ success !!\n");
 
 	spin_lock_irqsave (&ax_local->page_lock, flags);
-
+	ax88796_info_init();
 	ax88796b_reset (ndev);
 	ret = ax88796b_init (ndev, 1);
 	if (ret != 0) {
@@ -3505,17 +2849,16 @@ static int ax88796b_close (struct net_device *ndev)
 	struct ax_device *ax_local = ax_get_priv (ndev);
 	unsigned long flags;
 	int i = 0;
-	// void *ax_base = ax_local->membase;
 
 	gAxStop = 1;
 	printk("hndz gAxRxTx_state %d curr 0x%x!\n", gAxRxTx_state, CurrImr);
-	printk("hndz netif_queue_stopped state %d!\n", netif_queue_stopped(ndev));
+	// printk("hndz netif_queue_stopped state %d!\n", netif_queue_stopped(ndev));
 
 
 
  	PRINTK (DEBUG_MSG, PFX " %s beginning ..........\n", __FUNCTION__);
 
-	 napi_disable(&ax_local->napi);
+	napi_disable(&ax_local->napi);
 	del_timer_sync (&ax_local->watchdog);
 	disable_irq (ndev->irq);
 
@@ -3533,8 +2876,7 @@ static int ax88796b_close (struct net_device *ndev)
 	ax88796b_init (ndev, 0);
 
 	free_irq (ndev->irq, ndev);
-	gAxRxTx_state = 0;
-	CurrImr  = 0;
+	ax88796_info_init();
    	spin_unlock_irqrestore (&ax_local->page_lock, flags);
 
 	netif_stop_queue (ndev);
@@ -3638,19 +2980,6 @@ static int ax_probe (struct net_device *ndev, struct ax_device *ax_local)
 	ax_local->stop_page = NESM_STOP_PG;
 	ax_local->media = media;
 
-// 	if (weight == 0) {
-// #ifndef AX88796_SDMA_MODE
-// 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, 4);
-// #else
-// 		netif_napi_add(ndev, &ax_local->napi, ax88796b_sdma_poll, 4);
-// #endif
-		
-// 		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT (default) = %d\n", 4);
-// 	}
-// 	else {
-// 		netif_napi_add(ndev, &ax_local->napi, ax88796b_poll, weight);
-// 		//PRINTK (DRIVER_MSG, "NAPI_WEIGHT= %d\n", weight);
-// 	}
 	netif_napi_add(ndev, &ax_local->napi, ax88796b_dma_poll, AX88796_WIGH);
 #if (CONFIG_AX88796B_8BIT_WIDE == 1)
 	ax_local->bus_width = 0;

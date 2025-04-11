@@ -63,8 +63,6 @@ struct platform_device *__init imx_add_mxc_ehci(
 		const struct imx_mxc_ehci_data *data,
 		const struct mxc_usbh_platform_data *pdata)
 {
-	printk("zty add ehci !\n");
-	dump_stack();
 	struct resource res[] = {
 		{
 			.start = data->iobase,
