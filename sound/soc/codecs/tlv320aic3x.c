@@ -389,6 +389,10 @@ static const struct snd_kcontrol_new aic3x_snd_controls[] = {
 	SOC_ENUM("Right AGC Attack time", aic3x_agc_attack_enum[1]),
 	SOC_ENUM("Left AGC Decay time", aic3x_agc_decay_enum[0]),
 	SOC_ENUM("Right AGC Decay time", aic3x_agc_decay_enum[1]),
+	SOC_DOUBLE_R("AGC Maximum Gain", LAGC_CTRL_B, RAGC_CTRL_B, 1, 0x77, 0),
+	SOC_DOUBLE_R("AGC Hysteresis", LAGC_CTRL_C, RAGC_CTRL_C, 6, 0x03, 0),
+	SOC_DOUBLE_R("AGC Noise Threshold", LAGC_CTRL_C, RAGC_CTRL_C, 1, 0x1F, 0),
+	SOC_DOUBLE_R("AGC Clip Stepping", LAGC_CTRL_C, RAGC_CTRL_C, 0, 0x01, 0),
 
 	/* De-emphasis */
 	SOC_DOUBLE("De-emphasis Switch", AIC3X_CODEC_DFILT_CTRL, 2, 0, 0x01, 0),
@@ -1322,6 +1326,13 @@ static int aic3x_init(struct snd_soc_codec *codec)
 	/* Line2 Line Out default volume, disconnect from Output Mixer */
 	snd_soc_write(codec, LINE2L_2_LLOPM_VOL, DEFAULT_VOL);
 	snd_soc_write(codec, LINE2R_2_RLOPM_VOL, DEFAULT_VOL);
+
+	snd_soc_write(codec, LAGC_CTRL_A,0x80);
+	snd_soc_write(codec, LAGC_CTRL_B,0xfe);
+	snd_soc_write(codec, LAGC_CTRL_C,0x99);
+	snd_soc_write(codec, RAGC_CTRL_A,0x80);
+	snd_soc_write(codec, RAGC_CTRL_B,0xfe);
+	snd_soc_write(codec, RAGC_CTRL_C,0x99);
 
 	switch (aic3x->model) {
 	case AIC3X_MODEL_3X:
