@@ -1052,6 +1052,8 @@ static void setup(struct super_block *sb)
 
 static int vfat_fill_super(struct super_block *sb, void *data, int silent)
 {
+	printk("hndz vfat_fill_super start!\n");
+	dump_stack();
 	return fat_fill_super(sb, data, silent, 1, setup);
 }
 

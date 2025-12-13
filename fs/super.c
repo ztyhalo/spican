@@ -952,7 +952,8 @@ struct dentry *mount_bdev(struct file_system_type *fs_type,
 	bdev = blkdev_get_by_path(dev_name, mode, fs_type);
 	if (IS_ERR(bdev))
 		return ERR_CAST(bdev);
-
+	printk("hndz mount bdev name %s dev_name %s!\n",bdev->bd_disk->disk_name, dev_name);
+	dump_stack();
 	/*
 	 * once the super is inserted into the list by sget, s_umount
 	 * will protect the lockfs code from trying to start a snapshot

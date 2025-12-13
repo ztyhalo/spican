@@ -841,30 +841,37 @@ int OV5640_get_sysclk(void)
 	int sclk_rdiv_map[] = {1, 2, 4, 8};
 
 	temp1 = ov5640_read_reg(0x3034, &temp);
+	printk("hndz 0x3034 is 0x%x!\n", temp1);
 	temp2 = temp1 & 0x0f;
 	if (temp2 == 8 || temp2 == 10)
 		Bit_div2x = temp2 / 2;
 
 	temp1 = ov5640_read_reg(0x3035, &temp);
+	printk("hndz 0x3035 is 0x%x!\n", temp1);
 	SysDiv = temp1>>4;
 	if (SysDiv == 0)
 		SysDiv = 16;
 
 	temp1 = ov5640_read_reg(0x3036, &temp);
 	Multiplier = temp1;
-
+	printk("hndz 0x3036 is 0x%x!\n", temp1);
 	temp1 = ov5640_read_reg(0x3037, &temp);
+	printk("hndz 0x3037 is 0x%x!\n", temp1);
 	PreDiv = temp1 & 0x0f;
 	Pll_rdiv = ((temp1 >> 4) & 0x01) + 1;
 
 	temp1 = ov5640_read_reg(0x3108, &temp);
+	printk("hndz 0x3108 is 0x%x!\n", temp1);
 	temp2 = temp1 & 0x03;
 	sclk_rdiv = sclk_rdiv_map[temp2];
 
 	VCO = xvclk * Multiplier / PreDiv;
 
 	sysclk = VCO / SysDiv / Pll_rdiv * 2 / Bit_div2x / sclk_rdiv;
-
+	printk("hndz xvclk is %d!\n", xvclk);
+	printk("hndz vco is %d xvclk %d multiplier %d prediv %d!\n", VCO, xvclk, Multiplier, PreDiv);
+	printk("hndz  SysDiv %d Pll_rdiv %d  Bit_div2x %d sclk_rdiv %d !\n",  SysDiv , Pll_rdiv , Bit_div2x , sclk_rdiv);
+	printk("hndz sys clk is %d!\n", sysclk);
 	return sysclk;
 }
 
@@ -886,7 +893,7 @@ int OV5640_get_HTS(void)
 
 	HTS = ov5640_read_reg(0x380c, &temp);
 	HTS = (HTS<<8) + ov5640_read_reg(0x380d, &temp);
-
+	printk("hndz HTS is %d!\n", HTS);
 	return HTS;
 }
 
@@ -900,7 +907,7 @@ int OV5640_get_VTS(void)
 	VTS = ov5640_read_reg(0x380e, &temp);
 
 	VTS = (VTS<<8) + ov5640_read_reg(0x380f, &temp);
-
+	printk("hndz VTS is %d!\n", VTS);
 	return VTS;
 }
 
@@ -1014,7 +1021,7 @@ void OV5640_set_bandingfilter(void)
 {
 	int prev_VTS;
 	int band_step60, max_band60, band_step50, max_band50;
-
+	printk("hndz set banding filter!\n");
 	/* read preview PCLK */
 	prev_sysclk = OV5640_get_sysclk();
 	/* read preview HTS */
@@ -1166,7 +1173,7 @@ static int ov5640_change_mode_exposure_calc(enum ov5640_frame_rate frame_rate,
 	if (ov5640_data.pix.width == 0 || ov5640_data.pix.height == 0 ||
 		pModeSetting == NULL || ArySize == 0)
 		return -EINVAL;
-
+	printk("hndz frame rate %d, mode %d, width %d height %d\n", frame_rate, mode, ov5640_data.pix.width, ov5640_data.pix.height);
 	/* auto focus */
 	/* OV5640_auto_focus();//if no af function, just skip it */
 
@@ -1441,7 +1448,7 @@ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
 
 	if (retval < 0)
 		goto err;
-
+	printk("hndz frame rate %d, mode %d init done\n", frame_rate, mode);
 	OV5640_set_AE_target(AE_Target);
 	OV5640_get_light_freq();
 	OV5640_set_bandingfilter();
@@ -1624,7 +1631,7 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
 	enum ov5640_frame_rate frame_rate;
 	enum ov5640_mode orig_mode;
 	int ret = 0;
-
+	printk("hndz ioctl_s_parm start\n");
 	/* Make sure power on */
 	ov5640_standby(0);
 
@@ -1846,7 +1853,11 @@ static int ioctl_enum_framesizes(struct v4l2_int_device *s,
 {
 	if (fsize->index > ov5640_mode_MAX)
 		return -EINVAL;
-
+	if(fsize->index == 0)
+	{
+		printk("hndz ioctl_enum_framesizes!\n");
+		// dump_stack();
+	}
 	fsize->pixel_format = ov5640_data.pix.pixelformat;
 	fsize->discrete.width =
 			max(ov5640_mode_info_data[0][fsize->index].width,
@@ -1980,7 +1991,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
 		       __func__, __FILE__);
 		return -EPERM;
 	}
-
+	printk("hndz ioctl_dev_init start frame rate %d\n", frame_rate);
 	ret = ov5640_init_mode(frame_rate, ov5640_mode_INIT, ov5640_mode_INIT);
 
 	return ret;

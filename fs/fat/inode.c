@@ -747,6 +747,7 @@ static int fat_write_inode(struct inode *inode, struct writeback_control *wbc)
 
 int fat_sync_inode(struct inode *inode)
 {
+	printk("fat sync inode!\n");
 	return __fat_write_inode(inode, 1);
 }
 
