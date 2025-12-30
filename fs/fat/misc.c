@@ -271,7 +271,7 @@ EXPORT_SYMBOL_GPL(fat_time_unix2fat);
 int fat_sync_bhs(struct buffer_head **bhs, int nr_bhs)
 {
 	int i, err = 0;
-
+	printk("hndz fat_sync_bhs!\n");
 	for (i = 0; i < nr_bhs; i++)
 		write_dirty_buffer(bhs[i], WRITE);
 

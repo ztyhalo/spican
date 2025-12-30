@@ -39,6 +39,8 @@ static void fat_ent_blocknr(struct super_block *sb, int entry,
 	WARN_ON(entry < FAT_START_ENT || sbi->max_cluster <= entry);
 	*offset = bytes & (sb->s_blocksize - 1);
 	*blocknr = sbi->fat_start + (bytes >> sb->s_blocksize_bits);
+	printk("hndz fat_ent_blocknr sbi->fatent_shift %d entry %d sb->s_blocksize %lu sbi->fat_start 0x%x\n", sbi->fatent_shift, entry,
+		     sb->s_blocksize, sbi->fat_start);
 }
 
 static void fat12_ent_set_ptr(struct fat_entry *fatent, int offset)
@@ -146,6 +148,7 @@ static int fat16_ent_get(struct fat_entry *fatent)
 
 static int fat32_ent_get(struct fat_entry *fatent)
 {
+	printk("hndz fat32_ent_get!\n");
 	int next = le32_to_cpu(*fatent->u.ent32_p) & 0x0fffffff;
 	WARN_ON((unsigned long)fatent->u.ent32_p & (4 - 1));
 	if (next >= BAD_FAT32)
@@ -344,6 +347,7 @@ static inline int fat_ent_update_ptr(struct super_block *sb,
 				return 0;
 		}
 	}
+	printk("hndz ops->ent_set_ptr %pF!\n", ops->ent_set_ptr);
 	ops->ent_set_ptr(fatent, offset);
 	return 1;
 }
@@ -363,14 +367,17 @@ int fat_ent_read(struct inode *inode, struct fat_entry *fatent, int entry)
 	}
 
 	fatent_set_entry(fatent, entry);
+	printk("hndz ops->ent_blocknr %pF!\n", ops->ent_blocknr);
 	ops->ent_blocknr(sb, entry, &offset, &blocknr);
-
+	printk("hndz ent offset %d blocknr %llu\n",offset,blocknr);
 	if (!fat_ent_update_ptr(sb, fatent, offset, blocknr)) {
 		fatent_brelse(fatent);
 		err = ops->ent_bread(sb, fatent, offset, blocknr);
+		printk("hndz ops->ent_bread %pF!\n", ops->ent_bread);
 		if (err)
 			return err;
 	}
+	printk("hndz ops->ent_get %pF!\n", ops->ent_get);
 	return ops->ent_get(fatent);
 }
 

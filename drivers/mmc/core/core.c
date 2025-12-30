@@ -217,9 +217,24 @@ mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 	pr_debug("%s: starting CMD%u arg %08x flags %08x\n",
 		 mmc_hostname(host), mrq->cmd->opcode,
 		 mrq->cmd->arg, mrq->cmd->flags);
+	if(strcmp(mmc_hostname(host), "mmc0") == 0)
+	{
+		printk("%s: starting CMD%u arg %08x flags %08x\n",
+				mmc_hostname(host), mrq->cmd->opcode,
+				mrq->cmd->arg, mrq->cmd->flags);
+		// if(mrq->cmd->opcode == 17 && mrq->cmd->arg == 0x3f)
+		// 	dump_stack();
+	}
 
 	if (mrq->data) {
 		pr_debug("%s:     blksz %d blocks %d flags %08x "
+			"tsac %d ms nsac %d\n",
+			mmc_hostname(host), mrq->data->blksz,
+			mrq->data->blocks, mrq->data->flags,
+			mrq->data->timeout_ns / 1000000,
+			mrq->data->timeout_clks);
+		if(strcmp(mmc_hostname(host), "mmc0") == 0)
+			printk("%s:     blksz %d blocks %d flags %08x "
 			"tsac %d ms nsac %d\n",
 			mmc_hostname(host), mrq->data->blksz,
 			mrq->data->blocks, mrq->data->flags,

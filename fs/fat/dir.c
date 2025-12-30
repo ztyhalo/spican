@@ -66,7 +66,10 @@ static inline void fat_dir_readahead(struct inode *dir, sector_t iblock,
 	bh = sb_find_get_block(sb, phys);
 	if (bh == NULL || !buffer_uptodate(bh)) {
 		for (sec = 0; sec < sbi->sec_per_clus; sec++)
+		{
 			sb_breadahead(sb, phys + sec);
+			// printk("hndz read phys + sec %llu!\n", phys + sec);
+		}
 	}
 	brelse(bh);
 }
@@ -98,9 +101,9 @@ next:
 	err = fat_bmap(dir, iblock, &phys, &mapped_blocks, 0);
 	if (err || !phys)
 		return -1;	/* beyond EOF or error */
-
-	fat_dir_readahead(dir, iblock, phys);
-
+	// printk("hndz fat readahead phys %llu!\n", phys);
+	fat_dir_readahead(dir, iblock, phys); //预读
+	// printk("hndz fat readahead end phys %llu!\n", phys);
 	*bh = sb_bread(sb, phys);
 	if (*bh == NULL) {
 		fat_msg_ratelimit(sb, KERN_ERR,
@@ -109,23 +112,30 @@ next:
 		*pos = (iblock + 1) << sb->s_blocksize_bits;
 		goto next;
 	}
-
+	// printk("hndz fat get entry end!\n");
 	offset = *pos & (sb->s_blocksize - 1);
 	*pos += sizeof(struct msdos_dir_entry);
 	*de = (struct msdos_dir_entry *)((*bh)->b_data + offset);
 
 	return 0;
 }
-
+static int g_printMark = 0;
 static inline int fat_get_entry(struct inode *dir, loff_t *pos,
 				struct buffer_head **bh,
 				struct msdos_dir_entry **de)
 {
+	if(g_printMark == 0)
+	{
+		printk("hndz fat_get_entry!\n");
+		// dump_stack();
+		g_printMark = 1;
+	}
 	/* Fast stuff first */
 	if (*bh && *de &&
 	   (*de - (struct msdos_dir_entry *)(*bh)->b_data) <
 				MSDOS_SB(dir->i_sb)->dir_per_block - 1) {
 		*pos += sizeof(struct msdos_dir_entry);
+		//  printk("hndz pos is %llu!\n", *pos);
 		(*de)++;
 		return 0;
 	}
@@ -940,6 +950,7 @@ int fat_subdirs(struct inode *dir)
 		if (de->attr & ATTR_DIR)
 			count++;
 	}
+	printk("hndz subdir count %d\n", count);
 	brelse(bh);
 	return count;
 }

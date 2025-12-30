@@ -380,7 +380,7 @@ static int fat_calc_dir_size(struct inode *inode)
 	if (ret < 0)
 		return ret;
 	inode->i_size = (fclus + 1) << sbi->cluster_bits;
-
+	printk("hndz inode->i_size %lld fclus %d sbi->cluster_bits %d!\n", inode->i_size, fclus, sbi->cluster_bits);
 	return 0;
 }
 
@@ -389,7 +389,7 @@ int fat_fill_inode(struct inode *inode, struct msdos_dir_entry *de)
 {
 	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
 	int error;
-
+	printk("hndz fat_fill_inode!\n");
 	MSDOS_I(inode)->i_pos = 0;
 	inode->i_uid = sbi->options.fs_uid;
 	inode->i_gid = sbi->options.fs_gid;
@@ -1202,7 +1202,7 @@ static int fat_read_root(struct inode *inode)
 	struct super_block *sb = inode->i_sb;
 	struct msdos_sb_info *sbi = MSDOS_SB(sb);
 	int error;
-
+	printk("hndz fat_read_root cluset 0x%x!\n", sbi->cluster_size);
 	MSDOS_I(inode)->i_pos = MSDOS_ROOT_INO;
 	inode->i_uid = sbi->options.fs_uid;
 	inode->i_gid = sbi->options.fs_gid;
@@ -1211,17 +1211,24 @@ static int fat_read_root(struct inode *inode)
 	inode->i_mode = fat_make_mode(sbi, ATTR_DIR, S_IRWXUGO);
 	inode->i_op = sbi->dir_ops;
 	inode->i_fop = &fat_dir_operations;
+	printk("hndz fat_read_root cluset 0x%x!\n", sbi->cluster_size);
 	if (sbi->fat_bits == 32) {
 		MSDOS_I(inode)->i_start = sbi->root_cluster;
+		printk("hndz fat_read_root sbi->root_cluster 0x%lx inode->i_size %llu!\n", sbi->root_cluster, (u64)inode->i_size);
 		error = fat_calc_dir_size(inode);
+		printk("hndz fat_read_root sbi->root_cluster 0x%lx inode->i_size %llu!\n", sbi->root_cluster, (u64)inode->i_size);
 		if (error < 0)
 			return error;
 	} else {
 		MSDOS_I(inode)->i_start = 0;
 		inode->i_size = sbi->dir_entries * sizeof(struct msdos_dir_entry);
 	}
+	printk("hndz fat_read_root cluset 0x%x!\n", sbi->cluster_size);
 	inode->i_blocks = ((inode->i_size + (sbi->cluster_size - 1))
 			   & ~((loff_t)sbi->cluster_size - 1)) >> 9;
+			   printk("hndz fat_read_root cluset 0x%x!\n", sbi->cluster_size);
+	printk("hndz inode->i_blocks = 0x%x, cluset_size = 0x%x inode->i_size 0x%llx!\n", (unsigned int)inode->i_blocks, sbi->cluster_size, (u64)inode->i_size);
+	printk("hndz fat_read_root cluset %d!\n", sbi->cluster_size);
 	MSDOS_I(inode)->i_logstart = 0;
 	MSDOS_I(inode)->mmu_private = inode->i_size;
 
@@ -1282,7 +1289,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	mutex_init(&sbi->nfs_build_inode_lock);
 	ratelimit_state_init(&sbi->ratelimit, DEFAULT_RATELIMIT_INTERVAL,
 			     DEFAULT_RATELIMIT_BURST);
-
+	// printk("fat mount options: %s!\n", data);
 	error = parse_options(sb, data, isvfat, silent, &debug, &sbi->options);
 	if (error)
 		goto out_fail;
@@ -1291,7 +1298,9 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 
 	error = -EIO;
 	sb_min_blocksize(sb, 512);
+	printk("hndz read sb bread!\n");
 	bh = sb_bread(sb, 0);
+	printk("hndz read sb bread end!\n");
 	if (bh == NULL) {
 		fat_msg(sb, KERN_ERR, "unable to read boot sector");
 		goto out_fail;
@@ -1299,13 +1308,13 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 
 	b = (struct fat_boot_sector *) bh->b_data;
 	if (!b->reserved) {
-		if (!silent)
+		// if (!silent)
 			fat_msg(sb, KERN_ERR, "bogus number of reserved sectors");
 		brelse(bh);
 		goto out_invalid;
 	}
 	if (!b->fats) {
-		if (!silent)
+		// if (!silent)
 			fat_msg(sb, KERN_ERR, "bogus number of FAT structure");
 		brelse(bh);
 		goto out_invalid;
@@ -1334,6 +1343,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 		brelse(bh);
 		goto out_invalid;
 	}
+	
 	sbi->sec_per_clus = b->sec_per_clus;
 	if (!is_power_of_2(sbi->sec_per_clus)) {
 		if (!silent)
@@ -1342,7 +1352,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 		brelse(bh);
 		goto out_invalid;
 	}
-
+	printk("hndz logical sector size %u sec_per_clus %d s_blocksize %lu!\n", logical_sector_size, sbi->sec_per_clus, sb->s_blocksize);
 	if (logical_sector_size < sb->s_blocksize) {
 		fat_msg(sb, KERN_ERR, "logical sector size too small for device"
 		       " (logical sector size = %u)", logical_sector_size);
@@ -1379,7 +1389,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	sbi->free_clus_valid = 0;
 	sbi->prev_free = FAT_START_ENT;
 	sb->s_maxbytes = 0xffffffff;
-
+	printk("hndz cluster_size %d cluster_bits %d!\n", sbi->cluster_size, sbi->cluster_bits);
 	if (!sbi->fat_length && b->fat32.length) {
 		struct fat_boot_fsinfo *fsinfo;
 		struct buffer_head *fsinfo_bh;
@@ -1436,6 +1446,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 
 	sbi->dir_start = sbi->fat_start + sbi->fats * sbi->fat_length;
 	sbi->dir_entries = get_unaligned_le16(&b->dir_entries);
+	printk("hndz sbi->dir_start %lu sbi->dir_entries 0x%x!\n", sbi->dir_start, sbi->dir_entries);
 	if (sbi->dir_entries & (sbi->dir_per_block - 1)) {
 		if (!silent)
 			fat_msg(sb, KERN_ERR, "bogus directory-entries per block"
@@ -1447,12 +1458,14 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	rootdir_sectors = sbi->dir_entries
 		* sizeof(struct msdos_dir_entry) / sb->s_blocksize;
 	sbi->data_start = sbi->dir_start + rootdir_sectors;
+	printk("hndz sbi->data_start %lu rootdir_sectors %d!\n",sbi->data_start,rootdir_sectors);
 	total_sectors = get_unaligned_le16(&b->sectors);
+	printk("hndz total_sectors %d!\n",total_sectors);
 	if (total_sectors == 0)
 		total_sectors = le32_to_cpu(b->total_sect);
 
 	total_clusters = (total_sectors - sbi->data_start) / sbi->sec_per_clus;
-
+	printk("hndz total_sectors %d!\n",total_clusters);
 	if (sbi->fat_bits != 32)
 		sbi->fat_bits = (total_clusters > MAX_FAT12) ? 16 : 12;
 
@@ -1472,7 +1485,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 		brelse(bh);
 		goto out_invalid;
 	}
-
+	printk("hndz total_sectors %d!\n",total_clusters);
 	sbi->max_cluster = total_clusters + FAT_START_ENT;
 	/* check the free_clusters, it's not necessarily correct */
 	if (sbi->free_clusters != -1 && sbi->free_clusters > total_clusters)
@@ -1557,6 +1570,7 @@ int fat_fill_super(struct super_block *sb, void *data, int silent, int isvfat,
 	}
 
 	fat_set_state(sb, 1, 0);
+	printk("hndz fat_fill_super end!\n");
 	return 0;
 
 out_invalid:

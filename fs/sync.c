@@ -59,7 +59,7 @@ int sync_filesystem(struct super_block *sb)
 	 */
 	if (sb->s_flags & MS_RDONLY)
 		return 0;
-
+	printk("hndz sync filesystem!\n");
 	ret = __sync_filesystem(sb, 0);
 	if (ret < 0)
 		return ret;
@@ -70,17 +70,24 @@ EXPORT_SYMBOL_GPL(sync_filesystem);
 static void sync_inodes_one_sb(struct super_block *sb, void *arg)
 {
 	if (!(sb->s_flags & MS_RDONLY))
+	{
 		sync_inodes_sb(sb);
+		printk("hndz sync inodes!\n");
+	}
 }
 
 static void sync_fs_one_sb(struct super_block *sb, void *arg)
 {
 	if (!(sb->s_flags & MS_RDONLY) && sb->s_op->sync_fs)
+	{
 		sb->s_op->sync_fs(sb, *(int *)arg);
+		printk("hndz sysc_Fsonesb!\n");
+	}
 }
 
 static void fdatawrite_one_bdev(struct block_device *bdev, void *arg)
 {
+	printk("hndz fdatawrite_one_bdev!\n");
 	filemap_fdatawrite(bdev->bd_inode->i_mapping);
 }
 

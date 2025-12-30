@@ -237,7 +237,7 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 	*dclus = MSDOS_I(inode)->i_start;
 	if (cluster == 0)
 		return 0;
-
+	printk("hndz fat cache lookup!\n");
 	if (fat_cache_lookup(inode, cluster, &cid, fclus, dclus) < 0) {
 		/*
 		 * dummy, always not contiguous
@@ -245,7 +245,7 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 		 */
 		cache_init(&cid, -1, -1);
 	}
-
+	printk("hndz fat cache lookup end!\n");
 	fatent_init(&fatent);
 	while (*fclus < cluster) {
 		/* prevent the infinite loop of cluster chain */
@@ -257,8 +257,9 @@ int fat_get_cluster(struct inode *inode, int cluster, int *fclus, int *dclus)
 			nr = -EIO;
 			goto out;
 		}
-
+		printk("hndz fat ent_read!\n");
 		nr = fat_ent_read(inode, &fatent, *dclus);
+		printk("hndz fat ent_read end!\n");
 		if (nr < 0)
 			goto out;
 		else if (nr == FAT_ENT_FREE) {
@@ -324,6 +325,7 @@ int fat_bmap(struct inode *inode, sector_t sector, sector_t *phys,
 	}
 
 	last_block = (i_size_read(inode) + (blocksize - 1)) >> blocksize_bits;
+	// printk("hndz last_block %llu, sector %llu!\n", last_block, sector);
 	if (sector >= last_block) {
 		if (!create)
 			return 0;
@@ -340,7 +342,9 @@ int fat_bmap(struct inode *inode, sector_t sector, sector_t *phys,
 
 	cluster = sector >> (sbi->cluster_bits - sb->s_blocksize_bits);
 	offset  = sector & (sbi->sec_per_clus - 1);
+	// printk("hndz fat bmap cluster %d!\n", cluster);
 	cluster = fat_bmap_cluster(inode, cluster);
+	// printk("hndz fat bmap cluster end %d!\n", cluster);
 	if (cluster < 0)
 		return cluster;
 	else if (cluster) {
